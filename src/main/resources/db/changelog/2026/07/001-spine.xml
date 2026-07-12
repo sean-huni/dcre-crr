@@ -9,6 +9,11 @@
          columns per R-15; role-based account names per R-32; amounts keep the
          raw digits alongside the config-scaled DECIMAL while A-1 is open. -->
     <changeSet id="001-tx-header" author="dcre">
+        <!-- Converges from any bootstrap order: dcre-prg mints these tables
+             IF NOT EXISTS as a bootstrap guard when its clock fires first. -->
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="tx_header"/></not>
+        </preConditions>
         <createTable tableName="tx_header">
             <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
                 <constraints primaryKey="true" nullable="false"/>
@@ -28,6 +33,11 @@
     </changeSet>
 
     <changeSet id="001-tx-entry" author="dcre">
+        <!-- Converges from any bootstrap order: dcre-prg mints these tables
+             IF NOT EXISTS as a bootstrap guard when its clock fires first. -->
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="tx_entry"/></not>
+        </preConditions>
         <createTable tableName="tx_entry">
             <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
                 <constraints primaryKey="true" nullable="false"/>
