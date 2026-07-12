@@ -6,7 +6,7 @@
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <!-- BaseEntity columns (configuration.md point 20). -->
-    <changeSet id="003-layering-columns" author="dcre">
+    <changeSet id="003-layering-columns-crr" author="dcre">
         <sql>
             ALTER TABLE tx_header ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
             ALTER TABLE tx_header ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
