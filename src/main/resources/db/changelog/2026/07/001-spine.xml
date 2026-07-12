@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Collections spine (CRR single writer, R-04). Raw + canonical identity
+         columns per R-15; role-based account names per R-32; amounts keep the
+         raw digits alongside the config-scaled DECIMAL while A-1 is open. -->
+    <changeSet id="001-tx-header" author="dcre">
+        <createTable tableName="tx_header">
+            <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="arrival_id" type="UUID">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_header_arrival"/>
+            </column>
+            <column name="msg_id_raw" type="VARCHAR(35)"><constraints nullable="false"/></column>
+            <column name="msg_id" type="VARCHAR(35)"><constraints nullable="false"/></column>
+            <column name="created_ts" type="VARCHAR(14)"><constraints nullable="false"/></column>
+            <column name="tx_count" type="INT"><constraints nullable="false"/></column>
+            <column name="initg_pty" type="VARCHAR(35)"><constraints nullable="false"/></column>
+            <column name="business_date" type="VARCHAR(8)"><constraints nullable="false"/></column>
+            <column name="client_token" type="VARCHAR(16)"/>
+            <column name="layout_version" type="INT"><constraints nullable="false"/></column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="001-tx-entry" author="dcre">
+        <createTable tableName="tx_entry">
+            <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="arrival_id" type="UUID"><constraints nullable="false"/></column>
+            <column name="sequence" type="INT"><constraints nullable="false"/></column>
+            <column name="record_type" type="VARCHAR(2)"><constraints nullable="false"/></column>
+            <column name="e2e_raw" type="VARCHAR(35)"><constraints nullable="false"/></column>
+            <column name="e2e" type="VARCHAR(35)"><constraints nullable="false"/></column>
+            <column name="creditor_account" type="VARCHAR(23)"><constraints nullable="false"/></column>
+            <column name="contract_ref" type="VARCHAR(14)"/>
+            <column name="currency" type="VARCHAR(3)"><constraints nullable="false"/></column>
+            <column name="amount_raw" type="VARCHAR(15)"><constraints nullable="false"/></column>
+            <column name="amount" type="DECIMAL(18,2)"><constraints nullable="false"/></column>
+            <column name="branch_code" type="VARCHAR(11)"/>
+            <column name="debtor_name" type="VARCHAR(35)"/>
+            <column name="debtor_account" type="VARCHAR(23)"/>
+            <column name="acc_type_seq" type="VARCHAR(8)"/>
+        </createTable>
+        <addUniqueConstraint tableName="tx_entry" columnNames="arrival_id, sequence"
+                             constraintName="uq_entry_arrival_sequence"/>
+    </changeSet>
+
+</databaseChangeLog>

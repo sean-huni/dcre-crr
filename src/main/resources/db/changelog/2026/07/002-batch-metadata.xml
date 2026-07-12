@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- A-39b resolved: Liquibase-owned copy of the Spring Batch 6.0.4
+         postgres DDL, table-prefixed per service (CRR_BATCH_) for
+         single-writer cleanliness (R-34), EXIT_MESSAGE widened to TEXT so
+         CRDB-driver cause chains are never truncated. -->
+    <changeSet id="002-batch-metadata-crr" author="dcre">
+        <sqlFile path="db/changelog/2026/07/batch-metadata-crr.sql" splitStatements="true"/>
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,3 @@
+# dcre-crr
+
+Collection Request Reader: OnHost copybook FlatFile to the collections spine (tx_header/tx_entry). Boundary reader per R-30. Header tasklet runs the file-fatal structural tier (length, version incl. V1 fail-closed per A-2, declared count, R-31 filename-vs-header) and routes FILE_FATAL as a business verdict (job COMPLETED, seam file); the chunked detail step upserts tx_entry keyed (arrival_id, sequence) so restarts never duplicate (R-05). Batch metadata in prefixed CRR_BATCH_ tables via a Liquibase-owned copy of the Batch 6 DDL with EXIT_MESSAGE widened (A-39b); stale STARTED executions self-abandoned at startup (A-39a). Identifying JobParameter: arrival.id (R-16).
