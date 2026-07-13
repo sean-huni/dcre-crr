@@ -14,22 +14,26 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Persists detail lines via the guarded UPSERT keyed (arrival_id, sequence):
  * a restarted chunk rewrites identical rows, never duplicates (R-05); writes
- * are batched per chunk (R-41). Each row carries a SHA-256 content hash over
- * the essential business fields for CTV's in-file dup scan (R-41). V1 (161)
- * fails closed unless dcre.v1-enabled (A-2).
+ * are batched per chunk (R-41). Sequence derives from the record's position
+ * in the file (recordIndex + 1), never from shared counters, so partitioned
+ * ingest is deterministic (R-41). Each row carries a SHA-256 content hash
+ * over the essential business fields for CTV's in-file dup scan (R-41).
+ * V1 (161) fails closed unless dcre.v1-enabled (A-2).
  */
 public class SpineWriter {
+
+    /** A detail line plus its 0-based position among the file's detail records. */
+    public record NumberedLine(long recordIndex, String line) {
+    }
 
     private final TxEntryBatchDao dao;
     private final UUID arrivalId;
     private final int amountScale;
     private final boolean v1Enabled;
-    private final AtomicInteger sequence = new AtomicInteger(0);
 
     public SpineWriter(TxEntryBatchDao dao, UUID arrivalId, int amountScale, boolean v1Enabled) {
         this.dao = dao;
@@ -38,10 +42,10 @@ public class SpineWriter {
         this.v1Enabled = v1Enabled;
     }
 
-    public void writeDetails(List<? extends String> lines) {
+    public void writeDetails(List<? extends NumberedLine> lines) {
         List<TxEntryEntity> entities = new ArrayList<>(lines.size());
-        for (String line : lines) {
-            entities.add(toEntity(line, sequence.incrementAndGet()));
+        for (NumberedLine numbered : lines) {
+            entities.add(toEntity(numbered.line(), (int) numbered.recordIndex() + 1));
         }
         dao.batchUpsert(entities);
     }

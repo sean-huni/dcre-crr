@@ -21,3 +21,5 @@ dcre:
   exchange-root: ${DCRE_EXCHANGE_ROOT:../../infra/dcre-infra/exchange}
   amount-scale: ${DCRE_AMOUNT_SCALE:2}
   v1-enabled: ${DCRE_V1_ENABLED:false}
+  crr:
+    max-partitions: ${DCRE_CRR_MAX_PARTITIONS:5}
