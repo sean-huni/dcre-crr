@@ -18,7 +18,7 @@ CRR is the single writer of the spine tables (R-04); every downstream stage tran
 `crrJob` (za.co.fnb.dcre.crr.config.CrrJobConfig), two steps:
 
 1. `headerStep` (tasklet): `HeaderTasklet -> HeaderService` parses line 1 against `Layouts.HEADER` (attested content length 109) and runs the structural tier: empty file, header length, layout_version with V1 fail-closed unless `dcre.v1-enabled` (A-2), declared tx_count vs actual lines, R-31 filename-client vs header destination_id. On success it upserts `tx_header` keyed on arrival_id. On failure the step exits `FILE_FATAL`, the reason lands in the execution context as `fileFatalReason`, and the job transitions straight to end COMPLETED: a business verdict, never a process death.
-2. `detailStep` (chunk 100): `FlatFileItemReader` (skips the header line) feeds `SpineWriter`, which picks the layout by LRECL (`DETAIL_V2`, or `DETAIL_V1` = 161 which fails closed unless V1 is enabled; any other length is FILE_FATAL), parses amounts through the single `MoneyText` converter at `dcre.amount-scale`, and upserts `tx_entry` via a guarded native `INSERT ... ON CONFLICT (arrival_id, sequence) DO UPDATE` (CRDB `UPSERT` keys only on the PK, hence the explicit conflict target).
+2. `detailStep` (R-41 partitioned manager/worker pair): `LineRangePartitioner` splits the detail records into contiguous byte-offset ranges (base offset from line 1, stride from line 2's LRECL + 1 newline byte, all probed as byte counts so non-UTF-8 bytes never desync the offsets; a ragged length or an LRECL matching no layout is FILE_FATAL). Grid size is `PartitionSizer.partitions(dcre.crr.max-partitions)` (cgroup-aware CPU clamp) and the ranges fan out onto a `VirtualThreadTaskExecutor`. Each worker (`detailWorkerStep`, chunk 100) reads its range with `FixedRecordRangeReader` (ISO_8859_1, byte-transparent; restart resumes mid-range via `read.count`, R-05) into `SpineWriter`, which picks the layout by LRECL (`DETAIL_V2` = 169, or `DETAIL_V1` = 161 which fails closed unless V1 is enabled), parses amounts through the single `MoneyText` converter at `dcre.amount-scale`, computes a SHA-256 `content_hash` over the essential business fields (for CTV's in-file dup scan), and derives `sequence` from the record's file position (`recordIndex + 1`, never a shared counter, so partitioned ingest is deterministic). Writes go through `TxEntryBatchDao`, the sole owner of the guarded `INSERT ... ON CONFLICT (arrival_id, sequence) DO UPDATE`, batched 500 rows per `JdbcTemplate.batchUpdate` (CRDB `UPSERT` keys only on the PK, hence the explicit conflict target).
 
 `CrrJobListener` writes the business-verdict seam file (SYNTHETIC-CONTRACT, R-35) to `<exchange-root>/outcomes/<JOB_NAME>`: `BUSINESS_ACCEPTED` on a clean run, `BUSINESS_FILE_FATAL` when `fileFatalReason` is set. A non-COMPLETED execution writes nothing: the exit code and the K8s Failed condition are the witnesses, and AGT treats absence as never-success (R-33 arbiter clause).
 
@@ -26,7 +26,7 @@ JobParameters: `arrival.id` (identifying, UUID from AGT's arrival registry, R-16
 
 ## Key rules
 
-R-04 single writer, R-05 restart-without-duplication (upsert identity arrival_id/sequence), R-16 launch identity, R-19 file-fatal tier, R-30 boundary file I/O, R-31 filename grammar cross-check, R-33 two-plane failure evidence, R-34 exit-code wiring + prefixed metadata, R-35 synthetic seam contract, A-2 V1 fail-closed.
+R-04 single writer, R-05 restart-without-duplication (upsert identity arrival_id/sequence), R-16 launch identity, R-19 file-fatal tier, R-30 boundary file I/O, R-31 filename grammar cross-check, R-33 two-plane failure evidence, R-34 exit-code wiring + prefixed metadata, R-35 synthetic seam contract, R-41 intra-file parallelism + content hash, A-2 V1 fail-closed.
 
 ## Local module dependencies
 
@@ -46,6 +46,7 @@ R-04 single writer, R-05 restart-without-duplication (upsert identity arrival_id
 | `DCRE_EXCHANGE_ROOT` | `../../infra/dcre-infra/exchange` | Exchange root for the outcome seam |
 | `DCRE_AMOUNT_SCALE` | `2` | MoneyText scale (SYNTHETIC-CONTRACT while A-1 is open) |
 | `DCRE_V1_ENABLED` | `false` | V1 layout gate (A-2: fails closed in production) |
+| `DCRE_CRR_MAX_PARTITIONS` | `5` | Upper bound on the detailStep partition grid (R-41); actual grid = clamp(available CPUs, 1, this) |
 | `JOB_NAME` | `local-<executionId>` | Set by AGT on the K8s Job; names the outcome seam file |
 
 Clean clone runs with no `.env` at all; the working dev defaults are committed in `application.yml`.
@@ -57,12 +58,13 @@ Liquibase owns the schema, with per-service history tables (`crr_databasechangel
 - `001-spine.xml`: `tx_header` (UNIQUE arrival_id; raw + canonical msg_id per R-15) and `tx_entry` (UNIQUE arrival_id/sequence; raw + canonical e2e; amount_raw kept alongside the config-scaled DECIMAL while A-1 is open). Guarded MARK_RAN preconditions so bootstrap converges from any service order (dcre-prg mints the same tables IF NOT EXISTS).
 - `002-batch-metadata.xml`: Liquibase-owned copy of the Spring Batch 6.0.4 postgres DDL, prefixed `CRR_BATCH_` (`spring.batch.jdbc.table-prefix`, `initialize-schema: never`), EXIT_MESSAGE widened to TEXT so CRDB-driver cause chains are never truncated (A-39b).
 - `003-layering.xml`: BaseEntity columns (version, created_at, updated_at).
+- `004-content-hash.xml`: nullable `tx_entry.content_hash CHAR(64)` (SHA-256 over the essential business fields, R-41) plus the covering index `(arrival_id, content_hash, sequence)` for CTV's per-arrival window dup scan. Nullable on purpose: pre-M7 rows have no hash and the scan is per-arrival, so old rows never mix with new scans.
 
 `BatchMetaConfig` runs `StaleExecutionSweeper.abandonStale(ds, "CRR_BATCH_", 60)` before the job runner fires (A-39a): a relaunch after a pod kill never throws JobExecutionAlreadyRunning. AGT never touches service metadata.
 
 ## Build & test
 
-`./gradlew test` (needs Docker): `CrrJobTest` on Testcontainers CockroachDB v26.2.3 proves the DC sample parses into 1 header + 30 entries with MoneyText scaling, that the same identity refuses a second run without duplicating (R-05/R-16), and that a V1 file completes as FILE_FATAL with zero details persisted. Fixtures: `src/test/resources/dcre_copybook_v{1,2}_*.txt`. Platform libs resolve from mavenLocal (see Local module dependencies).
+`./gradlew test` (needs Docker): `CrrJobTest` on Testcontainers CockroachDB v26.2.3 proves the DC sample parses into 1 header + 30 entries with MoneyText scaling, that the same identity refuses a second run without duplicating (R-05/R-16), that a V1 file completes as FILE_FATAL with zero details persisted, and that an unpadded-header file and a non-UTF-8 byte both ingest byte-exactly. `LineRangePartitioner`/`FixedRecordRangeReader` unit tests cover byte-offset ranges, missing-final-newline, ragged-length and wrong-separator fail-closed, and mid-range restart. `CrrPartitionDeterminismTest` runs the same fixture under `dcre.crr.max-partitions` 1 vs 5 in two @Nested contexts and asserts identical `(sequence, e2e, content_hash)` rows (R-41 determinism). Fixtures: `src/test/resources/dcre_copybook_v{1,2}_*.txt`. Platform libs resolve from mavenLocal (see Local module dependencies).
 
 ## Run
 
