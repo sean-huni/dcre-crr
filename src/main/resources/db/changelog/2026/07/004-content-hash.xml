@@ -12,9 +12,13 @@
         <addColumn tableName="tx_entry">
             <column name="content_hash" type="CHAR(64)"/>
         </addColumn>
+        <!-- (arrival_id, content_hash, sequence): CTV's per-arrival window dup
+             scan partitions by content_hash and orders by sequence, fully
+             covered by this composite. -->
         <createIndex tableName="tx_entry" indexName="idx_tx_entry_arrival_content_hash">
             <column name="arrival_id"/>
             <column name="content_hash"/>
+            <column name="sequence"/>
         </createIndex>
     </changeSet>
 

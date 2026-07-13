@@ -9,7 +9,7 @@ import java.sql.SQLException;
 import java.util.List;
 
 /**
- * Batched companion to TxEntryRepo.upsert: the SAME guarded UPSERT SQL keyed
+ * Sole owner of the tx_entry write SQL: the guarded UPSERT keyed
  * (arrival_id, sequence) (R-05), driven through JdbcTemplate.batchUpdate in
  * 500-row batches so a 50k-tx file costs ~100 round trips, not 50k (R-41).
  */

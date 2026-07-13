@@ -5,9 +5,12 @@ import org.springframework.batch.core.partition.Partitioner;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import za.co.fnb.dcre.crr.service.FileFatalException;
+import za.co.fnb.dcre.platform.files.Layouts;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,10 +20,11 @@ import java.util.Map;
 /**
  * R-41: splits the detail records of a fixed-width copybook file into
  * contiguous [fromRecord, toRecord) ranges (0-based detail index, header
- * excluded). Record length on disk = detail LRECL + 1 newline byte; the
- * generator pads the header record to the detail LRECL, so the LRECL is
- * derived from the first line and the record count from the file length
- * (verified against the committed V2 fixture: 31 x 170 = 5270 bytes).
+ * excluded). Byte-exact: line lengths are probed as BYTE counts (never
+ * charset decodes), the base offset comes from line 1 (header of any length,
+ * padded or not) and the record stride from line 2 (detail LRECL + 1 newline
+ * byte). A missing final newline still yields the last record; any other
+ * ragged length, or a detail LRECL matching no layout, fails closed.
  */
 @Component
 @StepScope
@@ -29,6 +33,7 @@ public class LineRangePartitioner implements Partitioner {
     static final String FROM_RECORD = "fromRecord";
     static final String TO_RECORD = "toRecord";
     static final String LRECL = "lrecl";
+    static final String BASE_OFFSET = "baseOffset";
 
     private final Path input;
 
@@ -39,24 +44,44 @@ public class LineRangePartitioner implements Partitioner {
     @Override
     public Map<String, ExecutionContext> partition(int gridSize) {
         try {
-            int lrecl = detailLrecl();
-            long records = Files.size(input) / (lrecl + 1) - 1; // header record excluded
+            long size = Files.size(input);
+            long baseOffset = lineLength(0) + 1L; // header record + its newline
+            if (size <= baseOffset) {
+                return Map.of(); // header-only file: no detail records
+            }
+            int lrecl = lineLength(baseOffset);
+            if (lrecl != Layouts.DETAIL_V1.length() && lrecl != Layouts.DETAIL_V2.length()) {
+                throw new FileFatalException("detail LRECL " + lrecl + " matches no layout");
+            }
+            long stride = lrecl + 1L;
+            long detailBytes = size - baseOffset;
+            long remainder = detailBytes % stride;
+            if (remainder != 0 && remainder != lrecl) { // lrecl = final record without newline
+                throw new FileFatalException("file length " + size + " is not a whole number of "
+                        + lrecl + "-byte records after the " + (baseOffset - 1) + "-byte header");
+            }
+            long records = Math.ceilDiv(detailBytes, stride);
             Map<String, ExecutionContext> parts = split(records, gridSize);
-            parts.values().forEach(context -> context.putInt(LRECL, lrecl));
+            parts.values().forEach(context -> {
+                context.putInt(LRECL, lrecl);
+                context.putLong(BASE_OFFSET, baseOffset);
+            });
             return parts;
         } catch (IOException e) {
             throw new UncheckedIOException("cannot partition " + input, e);
         }
     }
 
-    /** Header record is padded to the detail LRECL, so line 1's length IS the LRECL. */
-    private int detailLrecl() throws IOException {
-        try (BufferedReader reader = Files.newBufferedReader(input)) {
-            String first = reader.readLine();
-            if (first == null || first.isEmpty()) {
-                throw new IOException("empty file " + input);
+    /** Byte count of the line starting at offset, up to \n or EOF; charset-free. */
+    private int lineLength(long offset) throws IOException {
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(input))) {
+            in.skipNBytes(offset);
+            int length = 0;
+            int b;
+            while ((b = in.read()) != -1 && b != '\n') {
+                length++;
             }
-            return first.length();
+            return length;
         }
     }
 

@@ -20,7 +20,9 @@ import org.testcontainers.containers.CockroachContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -119,5 +121,62 @@ class CrrJobTest {
         assertTrue(run.getExecutionContext().containsKey("fileFatalReason"));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM tx_entry WHERE arrival_id=?", Integer.class, v1Arrival),
                 "no details persisted for a file-fatal V1 file");
+    }
+
+    JobParameters paramsAbsolute(UUID arrival, java.nio.file.Path file, String name) {
+        return new JobParametersBuilder()
+                .addString("arrival.id", arrival.toString(), true)
+                .addString("input.file", file.toAbsolutePath().toString(), false)
+                .addString("original.name", name, false)
+                .toJobParameters();
+    }
+
+    List<String> projection(UUID arrival) {
+        return jdbc.queryForList(
+                "SELECT sequence || '|' || e2e || '|' || content_hash FROM tx_entry WHERE arrival_id=? ORDER BY sequence",
+                String.class, arrival);
+    }
+
+    @Test
+    @Order(4)
+    void unpaddedHeaderStillIngestsAllRecords() throws Exception {
+        // real header content is 109 bytes; only generator files pad it to the
+        // detail LRECL. Base offset must derive from line 1, stride from line 2.
+        byte[] padded = Files.readAllBytes(Path.of("src/test/resources/dcre_copybook_v2_dc_sample.txt"));
+        byte[] unpadded = new byte[109 + 1 + (padded.length - 170)];
+        System.arraycopy(padded, 0, unpadded, 0, 109);
+        unpadded[109] = '\n';
+        System.arraycopy(padded, 170, unpadded, 110, padded.length - 170);
+        Path file = Path.of("build/test-exchange/unpadded-header.txt");
+        Files.createDirectories(file.getParent());
+        Files.write(file, unpadded);
+
+        UUID arrival = UUID.randomUUID();
+        JobExecution run = jobOperator.start(crrJob,
+                paramsAbsolute(arrival, file, "FNBRF01_DCRERF2026071112000002.txt"));
+        assertEquals(BatchStatus.COMPLETED, run.getStatus());
+        assertEquals(projection(ARRIVAL), projection(arrival),
+                "unpadded-header ingest must match the padded-header ingest row for row");
+    }
+
+    @Test
+    @Order(5)
+    void nonUtf8ByteIngestsByteTransparently() throws Exception {
+        // 0xE9 (ISO_8859_1 e-acute) in debtor_name of record 1: strict-UTF-8
+        // decoding anywhere in the pipeline crashes or mangles the byte
+        byte[] bytes = Files.readAllBytes(Path.of("src/test/resources/dcre_copybook_v2_dc_sample.txt"));
+        bytes[170 + 103] = (byte) 0xE9; // detail record 0, first byte of debtor_name [103,138)
+        Path file = Path.of("build/test-exchange/iso-byte.txt");
+        Files.createDirectories(file.getParent());
+        Files.write(file, bytes);
+
+        UUID arrival = UUID.randomUUID();
+        JobExecution run = jobOperator.start(crrJob,
+                paramsAbsolute(arrival, file, "FNBRF01_DCRERF2026071112000002.txt"));
+        assertEquals(BatchStatus.COMPLETED, run.getStatus());
+        assertEquals(30, jdbc.queryForObject("SELECT count(*) FROM tx_entry WHERE arrival_id=?", Integer.class, arrival));
+        String debtorName = jdbc.queryForObject(
+                "SELECT debtor_name FROM tx_entry WHERE arrival_id=? AND sequence=1", String.class, arrival);
+        assertTrue(debtorName.contains("\u00E9"), "expected byte-transparent e-acute, got: " + debtorName);
     }
 }

@@ -35,7 +35,9 @@ public class HeaderService {
     /** @return the file-fatal reason, or empty when the header was accepted and persisted. */
     public Optional<String> ingestHeader(UUID arrivalId, Path input, String originalName) throws IOException {
         try {
-            List<String> lines = Files.readAllLines(input);
+            // ISO_8859_1: byte-transparent (one byte = one char), same contract as
+            // the partitioned range reader; strict UTF-8 would crash on legacy bytes
+            List<String> lines = Files.readAllLines(input, java.nio.charset.StandardCharsets.ISO_8859_1);
             if (lines.isEmpty()) {
                 throw new FileFatalException("empty file");
             }
