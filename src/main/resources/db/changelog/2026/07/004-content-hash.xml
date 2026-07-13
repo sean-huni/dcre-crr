@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- R-41: SHA-256 over the essential business fields, computed at ingest.
+         Nullable on purpose: pre-M7 rows have no hash; CTV's dup scan is
+         per-arrival so old rows never mix with new scans. -->
+    <changeSet id="crr-004-content-hash" author="dcre">
+        <addColumn tableName="tx_entry">
+            <column name="content_hash" type="CHAR(64)"/>
+        </addColumn>
+        <createIndex tableName="tx_entry" indexName="idx_tx_entry_arrival_content_hash">
+            <column name="arrival_id"/>
+            <column name="content_hash"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

@@ -12,7 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.FileSystemResource;
-import za.co.fnb.dcre.crr.data.repo.TxEntryRepo;
+import za.co.fnb.dcre.crr.data.repo.TxEntryBatchDao;
 import org.springframework.transaction.PlatformTransactionManager;
 import za.co.fnb.dcre.crr.service.CrrJobListener;
 import za.co.fnb.dcre.crr.service.HeaderTasklet;
@@ -66,10 +66,10 @@ public class CrrJobConfig {
 
     @Bean
     @StepScope
-    public SpineWriter spineWriter(TxEntryRepo repo,
+    public SpineWriter spineWriter(TxEntryBatchDao dao,
                                    @Value("#{jobParameters['arrival.id']}") String arrivalId,
                                    @Value("${dcre.amount-scale}") int amountScale,
                                    @Value("${dcre.v1-enabled}") boolean v1Enabled) {
-        return new SpineWriter(repo, UUID.fromString(arrivalId), amountScale, v1Enabled);
+        return new SpineWriter(dao, UUID.fromString(arrivalId), amountScale, v1Enabled);
     }
 }

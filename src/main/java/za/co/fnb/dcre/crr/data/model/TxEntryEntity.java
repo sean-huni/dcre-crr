@@ -23,12 +23,13 @@ public class TxEntryEntity extends BaseEntity {
     private String debtorName;
     private String debtorAccount;
     private String accTypeSeq;
+    private String contentHash;
 
     public static TxEntryEntity of(UUID arrivalId, int sequence, String recordType, String e2eRaw,
                                    String e2e, String creditorAccount, String contractRef,
                                    String currency, String amountRaw, BigDecimal amount,
                                    String branchCode, String debtorName, String debtorAccount,
-                                   String accTypeSeq) {
+                                   String accTypeSeq, String contentHash) {
         TxEntryEntity e = new TxEntryEntity();
         e.arrivalId = arrivalId;
         e.sequence = sequence;
@@ -44,6 +45,7 @@ public class TxEntryEntity extends BaseEntity {
         e.debtorName = debtorName;
         e.debtorAccount = debtorAccount;
         e.accTypeSeq = accTypeSeq;
+        e.contentHash = contentHash;
         return e;
     }
 
@@ -61,4 +63,5 @@ public class TxEntryEntity extends BaseEntity {
     public String getDebtorName() { return debtorName; }
     public String getDebtorAccount() { return debtorAccount; }
     public String getAccTypeSeq() { return accTypeSeq; }
+    public String getContentHash() { return contentHash; }
 }
