@@ -17,6 +17,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import za.co.fnb.dcre.crr.service.CrrJobListener;
 import za.co.fnb.dcre.crr.service.HeaderTasklet;
 import za.co.fnb.dcre.crr.service.SpineWriter;
+import za.co.fnb.dcre.platform.batch.CrdbRetryExceptionHandler;
 import za.co.fnb.dcre.platform.batch.PartitionSizer;
 
 import java.util.UUID;
@@ -31,12 +32,36 @@ import java.util.UUID;
 @Configuration
 public class CrrJobConfig {
 
+    /**
+     * CRDB 40001 retry for the tasklet WRITE step (headerStep: tx_header
+     * persist), same failure class CDE hit live under multi-copybook load.
+     * Commit-time aborts are covered: the tasklet commit runs inside the
+     * step's repeat loop and the re-run redoes the whole tasklet in a fresh
+     * transaction (shared platform handler, proven live in CTV).
+     *
+     * <p>Deliberately NOT registered on the chunk-oriented detailWorkerStep:
+     * ChunkOrientedTasklet removes its buffered INPUTS and marks the chunk
+     * context complete BEFORE the transaction commits, and
+     * StepContextRepeatCallback only re-queues INCOMPLETE chunk contexts
+     * (spring-batch-core 6.0.4), so a swallowed commit-time abort there would
+     * silently DROP the in-flight chunk (verified empirically 2026-07-14:
+     * step COMPLETED with writes=[[0,1],[2]] after chunk [0,1] aborted at
+     * commit). A commit abort on the worker stays step-FAILED -> relaunch,
+     * which re-reads from read.count and re-writes via the guarded upsert
+     * keyed (arrival_id, sequence) (R-05).
+     */
+    private final CrdbRetryExceptionHandler crdbRetry = new CrdbRetryExceptionHandler("CRR");
+
     @Bean
-    public Job crrJob(JobRepository repo, PlatformTransactionManager tx,
-                      HeaderTasklet headerTasklet, Step detailStep, CrrJobListener listener) {
-        Step headerStep = new StepBuilder("headerStep", repo)
+    public Step headerStep(JobRepository repo, PlatformTransactionManager tx, HeaderTasklet headerTasklet) {
+        return new StepBuilder("headerStep", repo)
                 .tasklet(headerTasklet, tx)
+                .exceptionHandler(crdbRetry)
                 .build();
+    }
+
+    @Bean
+    public Job crrJob(JobRepository repo, Step headerStep, Step detailStep, CrrJobListener listener) {
         return new JobBuilder("crrJob", repo)
                 .listener(listener)
                 .start(headerStep)
