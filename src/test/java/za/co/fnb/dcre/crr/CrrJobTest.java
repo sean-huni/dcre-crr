@@ -19,6 +19,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.CockroachContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,15 +29,27 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest(properties = {"spring.batch.job.enabled=false", "dcre.exchange-root=build/test-exchange"})
+@SpringBootTest(properties = {"spring.batch.job.enabled=false"})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class CrrJobTest {
 
     static final CockroachContainer CRDB =
             new CockroachContainer(DockerImageName.parse("cockroachdb/cockroach:v26.2.3"));
 
+    // Own exchange root per suite run: the seam name falls back to
+    // local-crr-<executionId>, and StagedWrite (R-24) is exists->skip, so a
+    // prior run's file left under a shared build dir would mask this run's
+    // verdict. A fresh temp dir isolates each run; clearOutcomes() below then
+    // isolates the individual seam assertions within the run.
+    static final Path EXCHANGE_ROOT;
+
     static {
         CRDB.start();
+        try {
+            EXCHANGE_ROOT = Files.createTempDirectory("crr-seam-exchange-");
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @DynamicPropertySource
@@ -44,9 +57,28 @@ class CrrJobTest {
         registry.add("spring.datasource.url", CRDB::getJdbcUrl);
         registry.add("spring.datasource.username", CRDB::getUsername);
         registry.add("spring.datasource.password", CRDB::getPassword);
+        registry.add("dcre.exchange-root", EXCHANGE_ROOT::toString);
         // second database for batch metadata on the same container
         registry.add("crr.batch.datasource.url",
                 () -> CRDB.getJdbcUrl().replace("/" + CRDB.getDatabaseName(), "/crr_meta"));
+    }
+
+    /**
+     * Isolate a seam assertion from any earlier job's outcome file: the fallback
+     * seam name local-crr-&lt;executionId&gt; can repeat across the suite's job
+     * runs, and StagedWrite never overwrites an existing target, so a stale file
+     * would silently keep a prior verdict. Clearing the outcomes dir before the
+     * run under test guarantees this run's verdict is the one written and read.
+     */
+    void clearOutcomes() throws IOException {
+        Path outcomes = EXCHANGE_ROOT.resolve("outcomes");
+        if (Files.isDirectory(outcomes)) {
+            try (var entries = Files.newDirectoryStream(outcomes)) {
+                for (Path entry : entries) {
+                    Files.deleteIfExists(entry);
+                }
+            }
+        }
     }
 
     @Autowired
@@ -157,6 +189,42 @@ class CrrJobTest {
         assertEquals(BatchStatus.COMPLETED, run.getStatus());
         assertEquals(projection(ARRIVAL), projection(arrival),
                 "unpadded-header ingest must match the padded-header ingest row for row");
+    }
+
+    @Test
+    @Order(6)
+    void seamFallbackNameIsSelfDescribing() throws Exception {
+        // SCRUM-58: a run without JOB_NAME in the env writes the outcome seam
+        // under the self-describing fallback local-crr-<executionId>.
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getenv("JOB_NAME") == null,
+                "test requires JOB_NAME absent from the environment");
+        clearOutcomes();
+        UUID arrival = UUID.randomUUID();
+        JobExecution run = jobOperator.start(crrJob,
+                params(arrival, "dcre_copybook_v2_dc_sample.txt", "FNBRF01_DCRERF2026071112000002.txt"));
+        assertEquals(BatchStatus.COMPLETED, run.getStatus());
+        Path seam = EXCHANGE_ROOT.resolve("outcomes").resolve("local-crr-" + run.getId());
+        assertTrue(Files.exists(seam), "expected self-describing seam file at " + seam);
+        assertEquals(List.of("BUSINESS_ACCEPTED"), Files.readAllLines(seam),
+                "clean-run business verdict must stay byte-exact");
+    }
+
+    @Test
+    @Order(7)
+    void seamCarriesFileFatalVerdictByteExact() throws Exception {
+        // Pins the business verdict the retired CrrJobListener derived from
+        // fileFatalReason, now supplied to the shared OutcomeSeamListener.
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getenv("JOB_NAME") == null,
+                "test requires JOB_NAME absent from the environment");
+        clearOutcomes();
+        UUID arrival = UUID.randomUUID();
+        JobExecution run = jobOperator.start(crrJob,
+                params(arrival, "dcre_copybook_v1_legacy_sample.txt", "FNBRF01_DCRERF2026071112000001.txt"));
+        assertEquals(BatchStatus.COMPLETED, run.getStatus());
+        Path seam = EXCHANGE_ROOT.resolve("outcomes").resolve("local-crr-" + run.getId());
+        assertTrue(Files.exists(seam), "expected self-describing seam file at " + seam);
+        assertEquals(List.of("BUSINESS_FILE_FATAL"), Files.readAllLines(seam),
+                "file-fatal business verdict must stay byte-exact");
     }
 
     @Test
