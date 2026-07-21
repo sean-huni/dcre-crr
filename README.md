@@ -6,8 +6,8 @@ Collections Request Reader: boundary stage that ingests OnHost copybook files in
 
 CRR is the first stage of both request DAGs. OnHost drops a fixed-width copybook file into the per-client exchange (`onhost-req/in`), AGT registers the arrival and launches CRR as a short-lived Kubernetes Job with `arrival.id` as the identifying JobParameter (R-16). CRR parses the header, runs the file-fatal structural tier (R-19), then ingests every detail record; it is the single writer of the spine tables (R-04), and every downstream stage transitions via the database, never via files (R-30).
 
-- DC route `onhost-req`: `CRR -> CTV -> { CDE || CIR }`
-- ENDO route `onhost-req-endo`: `CRR -> CTV -> AIS -> { CDE || CIR }`
+- DC Collections route `onhost-req`: `CRR -> CTV -> { CDE || CIR }` (CDE future-dates the work)
+- ENDO Payments route `onhost-req-endo`: `CRR -> CTV -> AIS -> CIR` (SCRUM-69: immediate, no CDE; CRR stamps `tx_header.flow = 'PAY'` from AGT's launch arg and CRW picks the work up from ingest day)
 
 ## Architecture and principles
 
