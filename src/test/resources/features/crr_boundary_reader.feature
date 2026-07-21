@@ -20,6 +20,18 @@ Feature: CRR boundary reader ingests OnHost collection request files
     Then the job completes with a clean business verdict
     And the spine holds one header row and 30 entry rows for the arrival
 
+  Scenario: A pay-flow launch stamps the header with the PAY flow
+    Given the boundary reader receives the standard V2 collection file
+    When the CRR job runs with the launch flow "PAY"
+    Then the job completes with a clean business verdict
+    And the header row is stamped with flow "PAY"
+
+  Scenario: A launch without a flow parameter defaults the header to collections
+    Given the boundary reader receives the standard V2 collection file
+    When the CRR job runs
+    Then the job completes with a clean business verdict
+    And the header row is stamped with flow "COL"
+
   Scenario: A header declaring the wrong transaction count is rejected file-fatally
     Given the boundary reader receives the V2 file with a header declaring 31 transactions
     When the CRR job runs

@@ -24,6 +24,9 @@ import java.util.UUID;
 @Service
 public class HeaderService {
 
+    /** Default flow: DC collections. AGT passes flow=PAY for ENDO arrivals (SCRUM-69). */
+    static final String FLOW_COL = "COL";
+
     private final TxHeaderRepo repo;
     private final boolean v1Enabled;
 
@@ -33,7 +36,8 @@ public class HeaderService {
     }
 
     /** @return the file-fatal reason, or empty when the header was accepted and persisted. */
-    public Optional<String> ingestHeader(UUID arrivalId, Path input, String originalName) throws IOException {
+    public Optional<String> ingestHeader(UUID arrivalId, Path input, String originalName, String flow)
+            throws IOException {
         try {
             // ISO_8859_1: byte-transparent (one byte = one char), same contract as
             // the partitioned range reader; strict UTF-8 would crash on legacy bytes
@@ -65,7 +69,8 @@ public class HeaderService {
             repo.upsert(TxHeaderEntity.of(arrivalId, msgId.rawBytes(), msgId.canonical(),
                     Layouts.HEADER.slice(header, "created_ts"), declared, destination,
                     Layouts.HEADER.slice(header, "business_date"),
-                    tokens.map(R31Filename.Tokens::client).orElse(null), version));
+                    tokens.map(R31Filename.Tokens::client).orElse(null), version,
+                    flow == null || flow.isBlank() ? FLOW_COL : flow));
             return Optional.empty();
         } catch (FileFatalException e) {
             return Optional.of(e.getMessage());

@@ -13,8 +13,8 @@ public interface TxHeaderRepo extends CrudRepository<TxHeaderEntity, UUID> {
 
     @Modifying
     @Query("""
-            INSERT INTO tx_header (arrival_id, msg_id_raw, msg_id, created_ts, tx_count, initg_pty, business_date, client_token, layout_version)
-            VALUES (:#{#e.arrivalId}, :#{#e.msgIdRaw}, :#{#e.msgId}, :#{#e.createdTs}, :#{#e.txCount}, :#{#e.initgPty}, :#{#e.businessDate}, :#{#e.clientToken}, :#{#e.layoutVersion})
-            ON CONFLICT (arrival_id) DO UPDATE SET msg_id_raw = EXCLUDED.msg_id_raw, msg_id = EXCLUDED.msg_id, created_ts = EXCLUDED.created_ts, tx_count = EXCLUDED.tx_count, initg_pty = EXCLUDED.initg_pty, business_date = EXCLUDED.business_date, client_token = EXCLUDED.client_token, layout_version = EXCLUDED.layout_version""")
+            INSERT INTO tx_header (arrival_id, msg_id_raw, msg_id, created_ts, tx_count, initg_pty, business_date, client_token, layout_version, flow)
+            VALUES (:#{#e.arrivalId}, :#{#e.msgIdRaw}, :#{#e.msgId}, :#{#e.createdTs}, :#{#e.txCount}, :#{#e.initgPty}, :#{#e.businessDate}, :#{#e.clientToken}, :#{#e.layoutVersion}, :#{#e.flow})
+            ON CONFLICT (arrival_id) DO UPDATE SET msg_id_raw = EXCLUDED.msg_id_raw, msg_id = EXCLUDED.msg_id, created_ts = EXCLUDED.created_ts, tx_count = EXCLUDED.tx_count, initg_pty = EXCLUDED.initg_pty, business_date = EXCLUDED.business_date, client_token = EXCLUDED.client_token, layout_version = EXCLUDED.layout_version, flow = EXCLUDED.flow""")
     void upsert(@Param("e") TxHeaderEntity e);
 }

@@ -29,7 +29,8 @@ public class HeaderTasklet implements Tasklet {
         Optional<String> fatal = service.ingestHeader(
                 UUID.fromString((String) params.get("arrival.id")),
                 Path.of((String) params.get("input.file")),
-                (String) params.get("original.name"));
+                (String) params.get("original.name"),
+                (String) params.get("flow"));
         if (fatal.isPresent()) {
             chunkContext.getStepContext().getStepExecution().getJobExecution()
                     .getExecutionContext().putString("fileFatalReason", fatal.get());
