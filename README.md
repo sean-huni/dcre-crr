@@ -52,7 +52,7 @@ Key rules: R-04 single writer, R-05 restart-without-duplication, R-16 launch ide
 - Java 25 (Gradle toolchain, resolved automatically)
 - Docker (Testcontainers tests and image build)
 - Platform libs `za.co.fnb.dcre:platform-*:0.1.0` published to Maven Local (no remote repository): run `./gradlew publishToMavenLocal` in each platform repo, publish chain `dcre-platform-model` -> `dcre-platform-files` -> `dcre-platform-batch`; `dcre-platform-persistence` is standalone. This repo declares `platform-batch` (`ExitCodeMain`, `OutcomeFileWriter`, `StaleExecutionSweeper`, `CrdbRetryExceptionHandler`, `PartitionSizer`; `Layouts`/`R31Filename`/`MoneyText` arrive transitively via its `api` chain) and `platform-persistence` (`BaseEntity`, `JdbcConfig`).
-- A reachable CockroachDB for a real local run (committed default: `localhost:26257`, database `dcre_collections`); the dcre-infra kind cluster provides one.
+- A reachable CockroachDB for a real local run (committed default: `localhost:26257`, database `dcre_col`); the dcre-infra kind cluster provides one.
 
 ## Quickstart
 
@@ -75,7 +75,7 @@ Env over committed dev defaults (precedence: yml default < environment).
 
 | Env | Default | Purpose |
 |---|---|---|
-| `DCRE_DB_URL` | `jdbc:postgresql://localhost:26257/dcre_collections?sslmode=disable` | Shared collections DB (CockroachDB) |
+| `DCRE_DB_URL` | `jdbc:postgresql://localhost:26257/dcre_col?sslmode=disable` | Shared collections DB (CockroachDB) |
 | `DCRE_DB_USER` | `root` | DB user |
 | `DCRE_DB_PASSWORD` | (empty) | DB password |
 | `DCRE_EXCHANGE_ROOT` | `../../../../../infra/dcre-infra/exchange` | Exchange root for the outcome seam file |
