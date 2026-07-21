@@ -14,10 +14,10 @@ import za.co.fnb.dcre.crr.batch.FixedRecordRangeReader;
 import za.co.fnb.dcre.crr.batch.LineRangePartitioner;
 import za.co.fnb.dcre.crr.data.repo.TxEntryBatchDao;
 import org.springframework.transaction.PlatformTransactionManager;
-import za.co.fnb.dcre.crr.service.CrrJobListener;
 import za.co.fnb.dcre.crr.service.HeaderTasklet;
 import za.co.fnb.dcre.crr.service.SpineWriter;
 import za.co.fnb.dcre.platform.batch.CrdbRetryExceptionHandler;
+import za.co.fnb.dcre.platform.batch.OutcomeSeamListener;
 import za.co.fnb.dcre.platform.batch.PartitionSizer;
 
 import java.util.UUID;
@@ -60,8 +60,21 @@ public class CrrJobConfig {
                 .build();
     }
 
+    /**
+     * Business-verdict seam (SYNTHETIC-CONTRACT, R-35) via the shared
+     * OutcomeSeamListener (SCRUM-58): ACCEPTED on a clean run, FILE_FATAL on
+     * a structural verdict. Technical failure writes nothing: the exit code
+     * and the K8s Failed condition are the witnesses (R-33 arbiter clause).
+     */
     @Bean
-    public Job crrJob(JobRepository repo, Step headerStep, Step detailStep, CrrJobListener listener) {
+    public OutcomeSeamListener seamListener(@Value("${dcre.exchange-root}") String exchangeRoot) {
+        return new OutcomeSeamListener("crr", exchangeRoot,
+                execution -> execution.getExecutionContext().containsKey("fileFatalReason")
+                        ? "BUSINESS_FILE_FATAL" : "BUSINESS_ACCEPTED");
+    }
+
+    @Bean
+    public Job crrJob(JobRepository repo, Step headerStep, Step detailStep, OutcomeSeamListener listener) {
         return new JobBuilder("crrJob", repo)
                 .listener(listener)
                 .start(headerStep)
