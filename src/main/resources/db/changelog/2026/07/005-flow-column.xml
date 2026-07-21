@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- SCRUM-69: ENDO = Payments. CRR stamps the flow at ingest ('COL'
+         default, 'PAY' when AGT passes launch arg flow=PAY); CRW's pay arm
+         selects eligible rows by this column from ingest day (no cde_schedule
+         on the pay flow). -->
+    <changeSet id="crr-005-flow-column" author="dcre">
+        <preConditions onFail="MARK_RAN">
+            <not><columnExists tableName="tx_header" columnName="flow"/></not>
+        </preConditions>
+        <addColumn tableName="tx_header">
+            <column name="flow" type="VARCHAR(8)" defaultValue="COL"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="tx_header" columnName="flow"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="crr-005-flow-backfill" author="dcre">
+        <!-- Idempotent: pre-005 rows are all DC collections. -->
+        <update tableName="tx_header">
+            <column name="flow" value="COL"/>
+            <where>flow IS NULL</where>
+        </update>
+        <rollback/>
+    </changeSet>
+
+    <changeSet id="crr-005-flow-not-null" author="dcre">
+        <!-- LIQUIBASE-SQL-EXCEPTION: column nullability has no typed precondition. -->
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="YES">
+                SELECT is_nullable FROM information_schema.columns
+                WHERE table_schema = current_schema() AND table_name = 'tx_header'
+                  AND column_name = 'flow'
+            </sqlCheck>
+        </preConditions>
+        <addNotNullConstraint tableName="tx_header" columnName="flow"
+                              columnDataType="VARCHAR(8)"/>
+        <rollback>
+            <dropNotNullConstraint tableName="tx_header" columnName="flow"
+                                   columnDataType="VARCHAR(8)"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

@@ -101,6 +101,16 @@ public class CrrSteps {
         execution = jobOperator.start(crrJob, params("2"));
     }
 
+    @When("the CRR job runs with the launch flow {string}")
+    public void crrJobRunsWithFlow(String flow) throws Exception {
+        // SCRUM-69: AGT passes flow=PAY for onhost-req-endo arrivals; the
+        // param is non-identifying, mirroring input.file/original.name.
+        JobParameters withFlow = new JobParametersBuilder(params(null))
+                .addString("flow", flow, false)
+                .toJobParameters();
+        execution = jobOperator.start(crrJob, withFlow);
+    }
+
     @Then("the job completes with a clean business verdict")
     public void jobCompletesClean() {
         assertEquals(BatchStatus.COMPLETED, execution.getStatus());
@@ -123,6 +133,12 @@ public class CrrSteps {
                 "SELECT count(*) FROM tx_header WHERE arrival_id=?", Integer.class, arrival));
         assertEquals(entries, jdbc.queryForObject(
                 "SELECT count(*) FROM tx_entry WHERE arrival_id=?", Integer.class, arrival));
+    }
+
+    @Then("the header row is stamped with flow {string}")
+    public void headerStampedWithFlow(String flow) {
+        assertEquals(flow, jdbc.queryForObject(
+                "SELECT flow FROM tx_header WHERE arrival_id=?", String.class, arrival));
     }
 
     @Then("no spine entries are persisted for the arrival")
