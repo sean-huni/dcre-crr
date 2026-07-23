@@ -17,6 +17,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import za.co.fnb.dcre.crr.service.HeaderTasklet;
 import za.co.fnb.dcre.crr.service.SpineWriter;
 import za.co.fnb.dcre.platform.batch.CrdbRetryExceptionHandler;
+import za.co.fnb.dcre.platform.batch.HeartbeatWriter;
 import za.co.fnb.dcre.platform.batch.OutcomeSeamListener;
 import za.co.fnb.dcre.platform.batch.PartitionSizer;
 
@@ -74,9 +75,11 @@ public class CrrJobConfig {
     }
 
     @Bean
-    public Job crrJob(JobRepository repo, Step headerStep, Step detailStep, OutcomeSeamListener listener) {
+    public Job crrJob(JobRepository repo, Step headerStep, Step detailStep,
+                      OutcomeSeamListener listener, HeartbeatWriter heartbeatWriter) {
         return new JobBuilder("crrJob", repo)
                 .listener(listener)
+                .listener(heartbeatWriter)
                 .start(headerStep)
                     .on(HeaderTasklet.EXIT_FILE_FATAL).end() // business verdict, job COMPLETED
                 .from(headerStep).on("*").to(detailStep)
