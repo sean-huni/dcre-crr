@@ -19,9 +19,9 @@ public class TxEntryBatchDao {
     static final int BATCH_SIZE = 500;
 
     private static final String UPSERT_SQL = """
-            INSERT INTO tx_entry (arrival_id, sequence, record_type, e2e_raw, e2e, creditor_account, contract_ref, currency, amount_raw, amount, branch_code, debtor_name, debtor_account, acc_type_seq, content_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (arrival_id, sequence) DO UPDATE SET record_type = EXCLUDED.record_type, e2e_raw = EXCLUDED.e2e_raw, e2e = EXCLUDED.e2e, creditor_account = EXCLUDED.creditor_account, contract_ref = EXCLUDED.contract_ref, currency = EXCLUDED.currency, amount_raw = EXCLUDED.amount_raw, amount = EXCLUDED.amount, branch_code = EXCLUDED.branch_code, debtor_name = EXCLUDED.debtor_name, debtor_account = EXCLUDED.debtor_account, acc_type_seq = EXCLUDED.acc_type_seq, content_hash = EXCLUDED.content_hash""";
+            INSERT INTO tx_entry (arrival_id, sequence, record_type, e2e_raw, e2e, creditor_account, contract_ref, currency, amount_raw, amount, branch_code, debtor_name, debtor_account, acc_type_seq, mandate_ref, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (arrival_id, sequence) DO UPDATE SET record_type = EXCLUDED.record_type, e2e_raw = EXCLUDED.e2e_raw, e2e = EXCLUDED.e2e, creditor_account = EXCLUDED.creditor_account, contract_ref = EXCLUDED.contract_ref, currency = EXCLUDED.currency, amount_raw = EXCLUDED.amount_raw, amount = EXCLUDED.amount, branch_code = EXCLUDED.branch_code, debtor_name = EXCLUDED.debtor_name, debtor_account = EXCLUDED.debtor_account, acc_type_seq = EXCLUDED.acc_type_seq, mandate_ref = EXCLUDED.mandate_ref, content_hash = EXCLUDED.content_hash""";
 
     private final JdbcTemplate jdbc;
 
@@ -51,6 +51,7 @@ public class TxEntryBatchDao {
         ps.setString(12, e.getDebtorName());
         ps.setString(13, e.getDebtorAccount());
         ps.setString(14, e.getAccTypeSeq());
-        ps.setString(15, e.getContentHash());
+        ps.setString(15, e.getMandateRef());
+        ps.setString(16, e.getContentHash());
     }
 }

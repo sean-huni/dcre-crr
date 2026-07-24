@@ -22,7 +22,10 @@ import java.util.UUID;
  * in the file (recordIndex + 1), never from shared counters, so partitioned
  * ingest is deterministic (R-41). Each row carries a SHA-256 content hash
  * over the essential business fields for CTV's in-file dup scan (R-41).
- * V1 (161) fails closed unless dcre.v1-enabled (A-2).
+ * V1 (161) fails closed unless dcre.v1-enabled (A-2). V3 (204) is the V2 body
+ * plus a trailing mandate_ref(35), the canonical collection-to-mandate link
+ * (M10); mandate_ref stays NULL for V1/V2 books and is excluded from the
+ * content hash (it is a link, not part of the money-movement identity).
  */
 public class SpineWriter {
 
@@ -65,8 +68,10 @@ public class SpineWriter {
                 layout.slice(line, "branch_code").strip(),
                 layout.slice(line, "debtor_name").strip(),
                 layout.slice(line, "debtor_account").strip(),
-                layout.length() == Layouts.DETAIL_V2.length()
+                layout.length() >= Layouts.DETAIL_V2.length()
                         ? layout.slice(line, "acc_type_seq") : null,
+                layout.length() == Layouts.DETAIL_V3.length()
+                        ? emptyToNull(layout.slice(line, "mandate_ref").strip()) : null,
                 contentHash(layout, line));
     }
 
@@ -94,7 +99,16 @@ public class SpineWriter {
         }
     }
 
+    /** A blank V3 mandate_ref means the collection targets no mandate; store
+     *  that as NULL so a missing link reads the same as a V1/V2 row (absent). */
+    private static String emptyToNull(String value) {
+        return value.isEmpty() ? null : value;
+    }
+
     FixedWidthLayout layoutFor(String line) {
+        if (line.length() == Layouts.DETAIL_V3.length()) {
+            return Layouts.DETAIL_V3;
+        }
         if (line.length() == Layouts.DETAIL_V2.length()) {
             return Layouts.DETAIL_V2;
         }

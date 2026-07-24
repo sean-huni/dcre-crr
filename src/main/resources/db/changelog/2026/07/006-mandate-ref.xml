@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- M10 (SCRUM-78): the canonical collection-to-mandate link. DETAIL_V3
+         (204 = V2 body + trailing mandate_ref 35) carries mandate_ref end to
+         end; CRR persists it here. Nullable by design: V1/V2 books have no
+         mandate_ref field, so their rows stay NULL (back-compat). Additive,
+         columnExists-guarded (MARK_RAN) so every reachable historical tx_entry
+         state converges without re-adding the column. -->
+    <changeSet id="crr-006-mandate-ref-column" author="dcre">
+        <preConditions onFail="MARK_RAN">
+            <not><columnExists tableName="tx_entry" columnName="mandate_ref"/></not>
+        </preConditions>
+        <addColumn tableName="tx_entry">
+            <column name="mandate_ref" type="VARCHAR(35)"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="tx_entry" columnName="mandate_ref"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

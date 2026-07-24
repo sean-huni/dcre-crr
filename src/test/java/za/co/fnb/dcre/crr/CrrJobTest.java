@@ -94,6 +94,7 @@ class CrrJobTest {
     JdbcTemplate jdbc;
 
     static final UUID ARRIVAL = UUID.randomUUID();
+    static final UUID V3_ARRIVAL = UUID.randomUUID();
 
     static {
         // create the metadata database before the context wires the batch DS
@@ -225,6 +226,47 @@ class CrrJobTest {
         assertTrue(Files.exists(seam), "expected self-describing seam file at " + seam);
         assertEquals(List.of("BUSINESS_FILE_FATAL"), Files.readAllLines(seam),
                 "file-fatal business verdict must stay byte-exact");
+    }
+
+    @Test
+    @Order(8)
+    void v3BookCarriesMandateRefWhileV2StaysNull() throws Exception {
+        // M10: DETAIL_V3 (204 = V2 body + trailing mandate_ref 35) is selected
+        // by LRECL; the canonical collection-to-mandate link lands on tx_entry.
+        JobExecution run = jobOperator.start(crrJob,
+                params(V3_ARRIVAL, "dcre_copybook_v3_dc_sample.txt", "FNBRF01_DCRERF2026071112000003.txt"));
+        assertEquals(BatchStatus.COMPLETED, run.getStatus());
+
+        assertEquals(30, jdbc.queryForObject(
+                "SELECT count(*) FROM tx_entry WHERE arrival_id=?", Integer.class, V3_ARRIVAL));
+        assertEquals("MND0000000001", jdbc.queryForObject(
+                "SELECT mandate_ref FROM tx_entry WHERE arrival_id=? AND sequence=1", String.class, V3_ARRIVAL));
+        // 28 rows carry a mandate link; the 2 blank-field V3 rows persist as NULL
+        assertEquals(28, jdbc.queryForObject(
+                "SELECT count(*) FROM tx_entry WHERE arrival_id=? AND mandate_ref IS NOT NULL", Integer.class, V3_ARRIVAL));
+        assertEquals(2, jdbc.queryForObject(
+                "SELECT count(*) FROM tx_entry WHERE arrival_id=? AND mandate_ref IS NULL", Integer.class, V3_ARRIVAL));
+        // back-compat: the V2 book (Order 1) has no mandate_ref field, every row NULL
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT count(*) FROM tx_entry WHERE arrival_id=? AND mandate_ref IS NOT NULL", Integer.class, ARRIVAL));
+    }
+
+    @Test
+    @Order(9)
+    void v3RerunSameIdentityDoesNotDuplicate() {
+        // R-05/R-16: mandate_ref rides the same guarded upsert keyed
+        // (arrival_id, sequence); a completed instance refuses a re-run and the
+        // spine stays exactly 30 rows, one per sequence (zero-dup on resume).
+        var thrown = org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () ->
+                jobOperator.start(crrJob,
+                        params(V3_ARRIVAL, "dcre_copybook_v3_dc_sample.txt", "FNBRF01_DCRERF2026071112000003.txt")));
+        assertTrue(thrown.getClass().getSimpleName().contains("JobInstanceAlreadyComplete")
+                        || String.valueOf(thrown.getMessage()).contains("already"),
+                "unexpected: " + thrown);
+        assertEquals(30, jdbc.queryForObject(
+                "SELECT count(*) FROM tx_entry WHERE arrival_id=?", Integer.class, V3_ARRIVAL));
+        assertEquals(30, jdbc.queryForObject(
+                "SELECT count(DISTINCT sequence) FROM tx_entry WHERE arrival_id=?", Integer.class, V3_ARRIVAL));
     }
 
     @Test
