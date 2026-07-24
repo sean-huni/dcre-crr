@@ -50,7 +50,8 @@ public class LineRangePartitioner implements Partitioner {
                 return Map.of(); // header-only file: no detail records
             }
             int lrecl = lineLength(baseOffset);
-            if (lrecl != Layouts.DETAIL_V1.length() && lrecl != Layouts.DETAIL_V2.length()) {
+            if (lrecl != Layouts.DETAIL_V1.length() && lrecl != Layouts.DETAIL_V2.length()
+                    && lrecl != Layouts.DETAIL_V3.length()) {
                 throw new FileFatalException("detail LRECL " + lrecl + " matches no layout");
             }
             long stride = lrecl + 1L;

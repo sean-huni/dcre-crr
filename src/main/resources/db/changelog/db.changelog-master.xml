@@ -10,5 +10,6 @@
     <include file="db/changelog/2026/07/003-layering.xml"/>
     <include file="db/changelog/2026/07/004-content-hash.xml"/>
     <include file="db/changelog/2026/07/005-flow-column.xml"/>
+    <include file="db/changelog/2026/07/006-mandate-ref.xml"/>
 
 </databaseChangeLog>

@@ -1,15 +1,18 @@
 package za.co.fnb.dcre.crr.service;
 
 import org.junit.jupiter.api.Test;
+import za.co.fnb.dcre.crr.data.model.TxEntryEntity;
 import za.co.fnb.dcre.platform.files.Layouts;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * R-41 content hash: covers the essential business fields only, so an
@@ -37,6 +40,28 @@ class SpineWriterTest {
         String b = a.substring(0, 2) + "DIFFERENTE2E".concat(" ".repeat(23)) + a.substring(37);
         assertEquals(SpineWriter.contentHash(Layouts.DETAIL_V2, a),
                 SpineWriter.contentHash(Layouts.DETAIL_V2, b));
+    }
+
+    /** A V3 line is the V2 body plus a trailing mandate_ref(35); the writer
+     *  selects DETAIL_V3 by LRECL (204) and maps mandate_ref onto the row. */
+    @Test
+    void mandateRefMappedFromV3Layout() {
+        String mandateRef = "MND0000000042";
+        String v3 = FIXTURE_V2_LINE + mandateRef + " ".repeat(35 - mandateRef.length());
+        assertEquals(Layouts.DETAIL_V3.length(), v3.length());
+        SpineWriter writer = new SpineWriter(null, UUID.randomUUID(), 2, true);
+        TxEntryEntity entity = writer.toEntity(v3, 1);
+        assertEquals(mandateRef, entity.getMandateRef());
+        // V3 is a V2 superset: acc_type_seq is still carried
+        assertEquals("DDA RCUR", entity.getAccTypeSeq());
+    }
+
+    /** Back-compat: a V2 line has no mandate_ref field, so the row stays NULL. */
+    @Test
+    void mandateRefNullForV2Layout() {
+        SpineWriter writer = new SpineWriter(null, UUID.randomUUID(), 2, true);
+        TxEntryEntity entity = writer.toEntity(FIXTURE_V2_LINE, 1);
+        assertNull(entity.getMandateRef());
     }
 
     @Test
