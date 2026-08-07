@@ -44,6 +44,17 @@ Feature: CRR boundary reader ingests OnHost collection request files
     Then the file is rejected file-fatally with a reason containing "header shorter"
     And no spine entries are persisted for the arrival
 
+  # The reason below LEAVES THE BUILDING: HeaderService -> HeaderTasklet ->
+  # executionContext["fileFatalReason"] -> cir InitialResponseService, written
+  # verbatim into the client's NACK file and into cir_response.reason. SCRUM-107
+  # moved this verdict from LineRangePartitioner to the header stage, which
+  # changed the wording a client sees for a ragged book, so it is pinned here.
+  Scenario: A ragged final detail record is rejected file-fatally naming its LRECL
+    Given the boundary reader receives the V2 file with a truncated final detail
+    When the CRR job runs
+    Then the file is rejected file-fatally with a reason containing "detail LRECL 100 matches no layout"
+    And no spine entries are persisted for the arrival
+
   Scenario: A filename contradicting the header destination is rejected file-fatally
     Given the boundary reader receives the standard V2 collection file
     And the file arrived under the name "FNBXX99_DCRERF2026071112000002.txt"

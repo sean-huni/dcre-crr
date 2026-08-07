@@ -84,6 +84,21 @@ public class CrrSteps {
         originalName = V2_NAME;
     }
 
+    @Given("the boundary reader receives the V2 file with a truncated final detail")
+    public void v2FileWithRaggedFinalDetail() throws Exception {
+        // The header and every earlier record are intact; only the LAST detail is
+        // cut short, to 100 bytes, which matches no layout. Before SCRUM-107 this
+        // reached LineRangePartitioner; it is now caught at the header stage, and
+        // the reason string a client receives is what this scenario pins.
+        arrival = UUID.randomUUID();
+        List<String> lines = Files.readAllLines(sample(V2_SAMPLE));
+        List<String> details = new java.util.ArrayList<>(lines.subList(1, lines.size()));
+        int last = details.size() - 1;
+        details.set(last, details.get(last).substring(0, 100));
+        inputFile = writeInput("ragged-detail", lines.get(0), details);
+        originalName = V2_NAME;
+    }
+
     @Given("the file arrived under the name {string}")
     public void arrivedUnderName(String name) {
         originalName = name;

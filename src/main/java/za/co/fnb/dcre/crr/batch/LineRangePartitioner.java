@@ -5,8 +5,8 @@ import org.springframework.batch.core.partition.Partitioner;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import za.co.fnb.dcre.crr.service.CollectionRecords;
 import za.co.fnb.dcre.crr.service.FileFatalException;
-import za.co.fnb.dcre.platform.copybook.Layouts;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
@@ -50,10 +50,7 @@ public class LineRangePartitioner implements Partitioner {
                 return Map.of(); // header-only file: no detail records
             }
             int lrecl = lineLength(baseOffset);
-            if (lrecl != Layouts.DETAIL_V1.length() && lrecl != Layouts.DETAIL_V2.length()
-                    && lrecl != Layouts.DETAIL_V3.length()) {
-                throw new FileFatalException("detail LRECL " + lrecl + " matches no layout");
-            }
+            CollectionRecords.detail(lrecl); // fail closed on an LRECL matching no layout
             long stride = lrecl + 1L;
             long detailBytes = size - baseOffset;
             long remainder = detailBytes % stride;

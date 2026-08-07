@@ -12,7 +12,6 @@ import za.co.fnb.dcre.platform.model.OpaqueRef;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,18 +45,18 @@ public class HeaderService {
             throws IOException {
         final String stampedFlow = validatedFlow(flow);
         try {
-            List<FixedWidthRecord> records = readRecords(input);
-            if (records.isEmpty()) {
+            BookRead book = readBook(input);
+            if (book.header() == null) {
                 throw new FileFatalException("empty file");
             }
-            FixedWidthRecord headerRecord = records.get(0);
+            FixedWidthRecord headerRecord = book.header();
             String header = headerRecord.line();
             int version = Integer.parseInt(headerRecord.field("layout_version").strip());
             if (version == 1 && !v1Enabled) {
                 throw new FileFatalException("V1 layout fails closed in production (A-2)");
             }
             int declared = Integer.parseInt(headerRecord.field("tx_count").strip());
-            int actual = records.size() - 1;
+            int actual = book.detailCount();
             if (declared != actual) {
                 throw new FileFatalException("header tx_count=" + declared + " but file has " + actual);
             }
@@ -79,19 +78,37 @@ public class HeaderService {
         }
     }
 
-    /** The shared copybook read, resolving each record's layout through
-     *  {@link CollectionRecords} so the header is cut by the header table and a
-     *  detail by its own. The short-record failure is translated into this
-     *  service's file-fatal vocabulary (R-19): record 0 short is the
-     *  malformed-header case the boundary reader has always reported; a later
-     *  short record is a ragged body, reported as itself, not blamed on the header. */
-    private static List<FixedWidthRecord> readRecords(Path input) throws IOException {
+    /** Record 0 and the detail count: everything this stage needs from the file. */
+    private record BookRead(FixedWidthRecord header, int detailCount) {
+    }
+
+    /**
+     * The shared copybook read, resolving each record's layout through
+     * {@link CollectionRecords} so the header is cut by the header table and a
+     * detail by its own. STREAMED: a collection book is large, which is why
+     * LineRangePartitioner and FixedRecordRangeReader exist, and this stage
+     * needs only record 0 and the count, so it holds one record at a time
+     * rather than the whole file plus a wrapper per line.
+     *
+     * <p>Only record 0 can be short here, so the translation names the header
+     * unconditionally: CollectionRecords rejects any detail whose LRECL matches
+     * no layout before the short gate is reached, and a detail that DOES match
+     * one is exactly that layout's length, so it can never be short. The
+     * previous "or report the later record as itself" branch was unreachable.
+     */
+    private static BookRead readBook(Path input) throws IOException {
+        FixedWidthRecord[] header = new FixedWidthRecord[1];
         try {
-            return CopybookReader.read(input, CollectionRecords.INSTANCE);
+            long records = CopybookReader.forEachRecord(input, CollectionRecords.INSTANCE,
+                    record -> {
+                        if (record.index() == 0) {
+                            header[0] = record;
+                        }
+                    });
+            return new BookRead(header[0], (int) records - 1);
         } catch (ShortRecordException e) {
-            throw new FileFatalException(e.recordIndex() == 0
-                    ? "header shorter than attested content length " + e.declaredLength()
-                    : e.getMessage());
+            throw new FileFatalException(
+                    "header shorter than attested content length " + e.declaredLength());
         }
     }
 
