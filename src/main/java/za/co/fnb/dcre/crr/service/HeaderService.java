@@ -4,11 +4,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import za.co.fnb.dcre.crr.data.model.TxHeaderEntity;
 import za.co.fnb.dcre.crr.data.repo.TxHeaderRepo;
-import za.co.fnb.dcre.platform.copybook.CopybookLayout;
 import za.co.fnb.dcre.platform.copybook.CopybookReader;
 import za.co.fnb.dcre.platform.copybook.FixedWidthRecord;
 import za.co.fnb.dcre.platform.copybook.ShortRecordException;
-import za.co.fnb.dcre.platform.files.Layouts;
 import za.co.fnb.dcre.platform.files.R31Filename;
 import za.co.fnb.dcre.platform.model.OpaqueRef;
 
@@ -35,13 +33,6 @@ public class HeaderService {
     static final String FLOW_COL = "COL";
     static final String FLOW_PAY = "PAY";
 
-    /** Record-length gate only: 109 is the shortest record a valid collection file
-     *  carries (every detail layout is longer). The field TABLE stays in
-     *  platform-files, the source of truth shared with mrr/ctv; re-declaring its
-     *  offsets here would be a hand-maintained mirror, free to drift. */
-    private static final CopybookLayout HEADER_GATE =
-            CopybookLayout.of(Layouts.HEADER.length(), List.of());
-
     private final TxHeaderRepo repo;
     private final boolean v1Enabled;
 
@@ -59,17 +50,18 @@ public class HeaderService {
             if (records.isEmpty()) {
                 throw new FileFatalException("empty file");
             }
-            String header = records.get(0).line();
-            int version = Integer.parseInt(Layouts.HEADER.slice(header, "layout_version").strip());
+            FixedWidthRecord headerRecord = records.get(0);
+            String header = headerRecord.line();
+            int version = Integer.parseInt(headerRecord.field("layout_version").strip());
             if (version == 1 && !v1Enabled) {
                 throw new FileFatalException("V1 layout fails closed in production (A-2)");
             }
-            int declared = Integer.parseInt(Layouts.HEADER.slice(header, "tx_count").strip());
+            int declared = Integer.parseInt(headerRecord.field("tx_count").strip());
             int actual = records.size() - 1;
             if (declared != actual) {
                 throw new FileFatalException("header tx_count=" + declared + " but file has " + actual);
             }
-            String destination = Layouts.HEADER.slice(header, "destination_id").strip();
+            String destination = headerRecord.field("destination_id").strip();
             Optional<R31Filename.Tokens> tokens = originalName != null
                     ? R31Filename.parse(originalName) : Optional.empty();
             if (tokens.isPresent() && !tokens.get().client().equals(destination)) {
@@ -78,8 +70,8 @@ public class HeaderService {
             }
             OpaqueRef msgId = OpaqueRef.ofFixedWidth(header.substring(4, 26));
             repo.upsert(TxHeaderEntity.of(arrivalId, msgId.rawBytes(), msgId.canonical(),
-                    Layouts.HEADER.slice(header, "created_ts"), declared, destination,
-                    Layouts.HEADER.slice(header, "business_date"),
+                    headerRecord.field("created_ts"), declared, destination,
+                    headerRecord.field("business_date"),
                     tokens.map(R31Filename.Tokens::client).orElse(null), version, stampedFlow));
             return Optional.empty();
         } catch (FileFatalException e) {
@@ -87,13 +79,15 @@ public class HeaderService {
         }
     }
 
-    /** The shared copybook read, its short-record failure translated into this
-     *  service's file-fatal vocabulary (R-19). Record 0 short is the
+    /** The shared copybook read, resolving each record's layout through
+     *  {@link CollectionRecords} so the header is cut by the header table and a
+     *  detail by its own. The short-record failure is translated into this
+     *  service's file-fatal vocabulary (R-19): record 0 short is the
      *  malformed-header case the boundary reader has always reported; a later
      *  short record is a ragged body, reported as itself, not blamed on the header. */
     private static List<FixedWidthRecord> readRecords(Path input) throws IOException {
         try {
-            return CopybookReader.read(input, HEADER_GATE);
+            return CopybookReader.read(input, CollectionRecords.INSTANCE);
         } catch (ShortRecordException e) {
             throw new FileFatalException(e.recordIndex() == 0
                     ? "header shorter than attested content length " + e.declaredLength()

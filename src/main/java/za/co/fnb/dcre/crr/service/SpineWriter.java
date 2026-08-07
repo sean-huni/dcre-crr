@@ -2,8 +2,8 @@ package za.co.fnb.dcre.crr.service;
 
 import za.co.fnb.dcre.crr.data.model.TxEntryEntity;
 import za.co.fnb.dcre.crr.data.repo.TxEntryBatchDao;
-import za.co.fnb.dcre.platform.files.FixedWidthLayout;
-import za.co.fnb.dcre.platform.files.Layouts;
+import za.co.fnb.dcre.platform.copybook.FixedWidthLayout;
+import za.co.fnb.dcre.platform.copybook.Layouts;
 import za.co.fnb.dcre.platform.model.MoneyText;
 import za.co.fnb.dcre.platform.model.OpaqueRef;
 
@@ -105,19 +105,14 @@ public class SpineWriter {
         return value.isEmpty() ? null : value;
     }
 
+    /** The detail layout for this line, plus the A-2 fail-closed gate. The
+     *  SELECTION itself lives in CollectionRecords, shared with the header
+     *  pre-read, so the file's record shapes are described in one place. */
     FixedWidthLayout layoutFor(String line) {
-        if (line.length() == Layouts.DETAIL_V3.length()) {
-            return Layouts.DETAIL_V3;
+        FixedWidthLayout layout = CollectionRecords.detail(line.length());
+        if (layout == Layouts.DETAIL_V1 && !v1Enabled) {
+            throw new FileFatalException("V1 layout fails closed in production (A-2)");
         }
-        if (line.length() == Layouts.DETAIL_V2.length()) {
-            return Layouts.DETAIL_V2;
-        }
-        if (line.length() == Layouts.DETAIL_V1.length()) {
-            if (!v1Enabled) {
-                throw new FileFatalException("V1 layout fails closed in production (A-2)");
-            }
-            return Layouts.DETAIL_V1;
-        }
-        throw new FileFatalException("detail LRECL " + line.length() + " matches no layout");
+        return layout;
     }
 }

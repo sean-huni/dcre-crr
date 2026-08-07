@@ -2,7 +2,7 @@ package za.co.fnb.dcre.crr.service;
 
 import org.junit.jupiter.api.Test;
 import za.co.fnb.dcre.crr.data.model.TxEntryEntity;
-import za.co.fnb.dcre.platform.files.Layouts;
+import za.co.fnb.dcre.platform.copybook.Layouts;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
