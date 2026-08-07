@@ -4,12 +4,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import za.co.fnb.dcre.crr.data.model.TxHeaderEntity;
 import za.co.fnb.dcre.crr.data.repo.TxHeaderRepo;
+import za.co.fnb.dcre.platform.copybook.CopybookLayout;
+import za.co.fnb.dcre.platform.copybook.CopybookReader;
+import za.co.fnb.dcre.platform.copybook.FixedWidthRecord;
+import za.co.fnb.dcre.platform.copybook.ShortRecordException;
 import za.co.fnb.dcre.platform.files.Layouts;
 import za.co.fnb.dcre.platform.files.R31Filename;
 import za.co.fnb.dcre.platform.model.OpaqueRef;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +23,10 @@ import java.util.UUID;
  * structural tier (R-19): length, version incl. V1 fail-closed (A-2),
  * declared count, R-31 filename-vs-header cross-check. Persists via the
  * data/repo tier only.
+ *
+ * <p>The copybook read itself (ISO_8859_1 byte-transparent decode, fail-closed
+ * record-length gate) lives in platform-copybook, shared with the payments and
+ * mandates readers so a fix reaches all three instead of one fork.
  */
 @Service
 public class HeaderService {
@@ -27,6 +34,13 @@ public class HeaderService {
     /** Default flow: DC collections. AGT passes flow=PAY for ENDO arrivals (SCRUM-69). */
     static final String FLOW_COL = "COL";
     static final String FLOW_PAY = "PAY";
+
+    /** Record-length gate only: 109 is the shortest record a valid collection file
+     *  carries (every detail layout is longer). The field TABLE stays in
+     *  platform-files, the source of truth shared with mrr/ctv; re-declaring its
+     *  offsets here would be a hand-maintained mirror, free to drift. */
+    private static final CopybookLayout HEADER_GATE =
+            CopybookLayout.of(Layouts.HEADER.length(), List.of());
 
     private final TxHeaderRepo repo;
     private final boolean v1Enabled;
@@ -41,22 +55,17 @@ public class HeaderService {
             throws IOException {
         final String stampedFlow = validatedFlow(flow);
         try {
-            // ISO_8859_1: byte-transparent (one byte = one char), same contract as
-            // the partitioned range reader; strict UTF-8 would crash on legacy bytes
-            List<String> lines = Files.readAllLines(input, java.nio.charset.StandardCharsets.ISO_8859_1);
-            if (lines.isEmpty()) {
+            List<FixedWidthRecord> records = readRecords(input);
+            if (records.isEmpty()) {
                 throw new FileFatalException("empty file");
             }
-            String header = lines.get(0);
-            if (header.length() < Layouts.HEADER.length()) {
-                throw new FileFatalException("header shorter than attested content length 109");
-            }
+            String header = records.get(0).line();
             int version = Integer.parseInt(Layouts.HEADER.slice(header, "layout_version").strip());
             if (version == 1 && !v1Enabled) {
                 throw new FileFatalException("V1 layout fails closed in production (A-2)");
             }
             int declared = Integer.parseInt(Layouts.HEADER.slice(header, "tx_count").strip());
-            int actual = lines.size() - 1;
+            int actual = records.size() - 1;
             if (declared != actual) {
                 throw new FileFatalException("header tx_count=" + declared + " but file has " + actual);
             }
@@ -75,6 +84,20 @@ public class HeaderService {
             return Optional.empty();
         } catch (FileFatalException e) {
             return Optional.of(e.getMessage());
+        }
+    }
+
+    /** The shared copybook read, its short-record failure translated into this
+     *  service's file-fatal vocabulary (R-19). Record 0 short is the
+     *  malformed-header case the boundary reader has always reported; a later
+     *  short record is a ragged body, reported as itself, not blamed on the header. */
+    private static List<FixedWidthRecord> readRecords(Path input) throws IOException {
+        try {
+            return CopybookReader.read(input, HEADER_GATE);
+        } catch (ShortRecordException e) {
+            throw new FileFatalException(e.recordIndex() == 0
+                    ? "header shorter than attested content length " + e.declaredLength()
+                    : e.getMessage());
         }
     }
 
