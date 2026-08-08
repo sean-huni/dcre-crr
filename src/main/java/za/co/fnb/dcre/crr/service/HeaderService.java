@@ -28,10 +28,6 @@ import java.util.UUID;
 @Service
 public class HeaderService {
 
-    /** Default flow: DC collections. AGT passes flow=PAY for ENDO arrivals (SCRUM-69). */
-    static final String FLOW_COL = "COL";
-    static final String FLOW_PAY = "PAY";
-
     private final TxHeaderRepo repo;
     private final boolean v1Enabled;
 
@@ -41,9 +37,8 @@ public class HeaderService {
     }
 
     /** @return the file-fatal reason, or empty when the header was accepted and persisted. */
-    public Optional<String> ingestHeader(UUID arrivalId, Path input, String originalName, String flow)
+    public Optional<String> ingestHeader(UUID arrivalId, Path input, String originalName)
             throws IOException {
-        final String stampedFlow = validatedFlow(flow);
         try {
             BookRead book = readBook(input);
             if (book.header() == null) {
@@ -71,7 +66,7 @@ public class HeaderService {
             repo.upsert(TxHeaderEntity.of(arrivalId, msgId.rawBytes(), msgId.canonical(),
                     headerRecord.field("created_ts"), declared, destination,
                     headerRecord.field("business_date"),
-                    tokens.map(R31Filename.Tokens::client).orElse(null), version, stampedFlow));
+                    tokens.map(R31Filename.Tokens::client).orElse(null), version));
             return Optional.empty();
         } catch (FileFatalException e) {
             return Optional.of(e.getMessage());
@@ -110,22 +105,5 @@ public class HeaderService {
             throw new FileFatalException(
                     "header shorter than attested content length " + e.declaredLength());
         }
-    }
-
-    /**
-     * Closed flow vocabulary (review m1, fail closed): COL or PAY only,
-     * absent/blank defaults to COL. Any other value is a launcher
-     * misconfiguration, never a business verdict about the FILE, so it
-     * throws (job FAILED) instead of returning a file-fatal reason.
-     */
-    private static String validatedFlow(String flow) {
-        if (flow == null || flow.isBlank()) {
-            return FLOW_COL;
-        }
-        if (!FLOW_COL.equals(flow) && !FLOW_PAY.equals(flow)) {
-            throw new IllegalArgumentException(
-                    "unknown flow launch parameter '" + flow + "': COL or PAY only (fail closed)");
-        }
-        return flow;
     }
 }

@@ -23,14 +23,20 @@ public class HeaderTasklet implements Tasklet {
         this.service = service;
     }
 
+    /**
+     * Reads only the parameters collections needs. AGT still emits a
+     * non-identifying {@code flow=PAY} arg on the ENDO route, and crrJob
+     * registers no JobParametersValidator, so an unread parameter is simply
+     * ignored: collections must not fail a launch over a parameter belonging
+     * to a lane it does not run.
+     */
     @Override
     public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
         var params = chunkContext.getStepContext().getJobParameters();
         Optional<String> fatal = service.ingestHeader(
                 UUID.fromString((String) params.get("arrival.id")),
                 Path.of((String) params.get("input.file")),
-                (String) params.get("original.name"),
-                (String) params.get("flow"));
+                (String) params.get("original.name"));
         if (fatal.isPresent()) {
             chunkContext.getStepContext().getStepExecution().getJobExecution()
                     .getExecutionContext().putString("fileFatalReason", fatal.get());

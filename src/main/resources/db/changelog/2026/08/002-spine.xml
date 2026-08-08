@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- ============================================================================
+         CRR v1 BASELINE, part 2 of 2: the collections spine.
+
+         THIS IS THE VERSION 1 BASELINE. Every DCRE database is dropped and recreated
+         at the v1 cutover, so this changelog only ever runs against an EMPTY schema.
+         The pre-v1 sequence (001-spine, 003-layering, 004-content-hash,
+         006-mandate-ref) is collapsed into the two tables it netted out to. There is
+         no history to be consistent with, so an add-then-alter ladder would only
+         preserve the shape of migrations that no database ever ran: version,
+         created_at, updated_at, content_hash and mandate_ref are simply columns of
+         these tables.
+
+         The usual re-run guards are deliberately absent:
+
+           - no onFail="MARK_RAN" tableExists preconditions. They let CRR converge
+             when a bootstrap-order peer had already minted the spine IF NOT EXISTS.
+             On an empty schema this create is the first and only one, and keeping
+             the guard would turn a loud failure into a silently missing table if the
+             spine were ever present for a reason nobody intended.
+           - no IF-NOT-EXISTS clauses and no ANY-checksum override, for the same
+             reason as part 1.
+
+         CRR is the single writer of both tables (R-04). Identity is arrival_id on
+         the header and (arrival_id, sequence) on the entry, which is the full
+         business identity a restart rewrites rather than duplicates (R-05).
+
+         There is no flow discriminator. It existed only because the collections and
+         payments lanes shared one table; with a database per family every row here
+         is a collection, so a column asserting that fact carries no information.
+
+         Raw and canonical identity columns are both kept per R-15, and amount_raw
+         sits alongside the config-scaled DECIMAL while A-1 is open. Account columns
+         are named by role per R-32. content_hash is nullable because the SHA-256
+         over the essential business fields (R-41) is computed at ingest and CTV's
+         dup scan is per-arrival. mandate_ref is nullable because only DETAIL_V3
+         (204 bytes) carries it: V1 and V2 books have no such field (M10, SCRUM-78).
+         ============================================================================ -->
+
+    <changeSet id="crr-v1-tx-header" author="dcre">
+        <createTable tableName="tx_header">
+            <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="arrival_id" type="UUID">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_header_arrival"/>
+            </column>
+            <column name="msg_id_raw" type="VARCHAR(35)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="msg_id" type="VARCHAR(35)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_ts" type="VARCHAR(14)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="tx_count" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="initg_pty" type="VARCHAR(35)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="business_date" type="VARCHAR(8)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="client_token" type="VARCHAR(16)"/>
+            <column name="layout_version" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMPTZ" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMPTZ" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <rollback>
+            <dropTable tableName="tx_header"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="crr-v1-tx-entry" author="dcre">
+        <createTable tableName="tx_entry">
+            <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="arrival_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sequence" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="record_type" type="VARCHAR(2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="e2e_raw" type="VARCHAR(35)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="e2e" type="VARCHAR(35)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="creditor_account" type="VARCHAR(23)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="contract_ref" type="VARCHAR(14)"/>
+            <column name="currency" type="VARCHAR(3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="amount_raw" type="VARCHAR(15)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="amount" type="DECIMAL(18,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="branch_code" type="VARCHAR(11)"/>
+            <column name="debtor_name" type="VARCHAR(35)"/>
+            <column name="debtor_account" type="VARCHAR(23)"/>
+            <column name="acc_type_seq" type="VARCHAR(8)"/>
+            <column name="content_hash" type="CHAR(64)"/>
+            <column name="mandate_ref" type="VARCHAR(35)"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMPTZ" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMPTZ" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="tx_entry" columnNames="arrival_id, sequence"
+                             constraintName="uq_entry_arrival_sequence"/>
+        <!-- (arrival_id, content_hash, sequence) fully covers CTV's per-arrival
+             window dup scan, which partitions by content_hash and orders by
+             sequence. -->
+        <createIndex tableName="tx_entry" indexName="idx_tx_entry_arrival_content_hash">
+            <column name="arrival_id"/>
+            <column name="content_hash"/>
+            <column name="sequence"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="tx_entry"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

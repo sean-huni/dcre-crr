@@ -17,11 +17,10 @@ public class TxHeaderEntity extends BaseEntity {
     private String businessDate;
     private String clientToken;
     private Integer layoutVersion;
-    private String flow;
 
     public static TxHeaderEntity of(UUID arrivalId, String msgIdRaw, String msgId, String createdTs,
                                     int txCount, String initgPty, String businessDate,
-                                    String clientToken, int layoutVersion, String flow) {
+                                    String clientToken, int layoutVersion) {
         TxHeaderEntity e = new TxHeaderEntity();
         e.arrivalId = arrivalId;
         e.msgIdRaw = msgIdRaw;
@@ -32,7 +31,6 @@ public class TxHeaderEntity extends BaseEntity {
         e.businessDate = businessDate;
         e.clientToken = clientToken;
         e.layoutVersion = layoutVersion;
-        e.flow = flow;
         return e;
     }
 
@@ -45,5 +43,4 @@ public class TxHeaderEntity extends BaseEntity {
     public String getBusinessDate() { return businessDate; }
     public String getClientToken() { return clientToken; }
     public Integer getLayoutVersion() { return layoutVersion; }
-    public String getFlow() { return flow; }
 }

@@ -20,17 +20,16 @@ Feature: CRR boundary reader ingests OnHost collection request files
     Then the job completes with a clean business verdict
     And the spine holds one header row and 30 entry rows for the arrival
 
-  Scenario: A pay-flow launch stamps the header with the PAY flow
+  # AGT still emits a non-identifying flow=PAY arg on the ENDO route
+  # (JobLauncher.serviceArgs). Collections does not run the payments lane and no
+  # longer models a flow, so CRR must IGNORE that parameter and ingest normally.
+  # Rejecting it would make an AGT arg a hard dependency of a lane CRR is not part
+  # of; this scenario pins the ignore.
+  Scenario: A launch carrying a leftover flow parameter is ingested normally
     Given the boundary reader receives the standard V2 collection file
-    When the CRR job runs with the launch flow "PAY"
+    When the CRR job runs with the extra launch parameter "flow" set to "PAY"
     Then the job completes with a clean business verdict
-    And the header row is stamped with flow "PAY"
-
-  Scenario: A launch without a flow parameter defaults the header to collections
-    Given the boundary reader receives the standard V2 collection file
-    When the CRR job runs
-    Then the job completes with a clean business verdict
-    And the header row is stamped with flow "COL"
+    And the spine holds one header row and 30 entry rows for the arrival
 
   Scenario: A header declaring the wrong transaction count is rejected file-fatally
     Given the boundary reader receives the V2 file with a header declaring 31 transactions
