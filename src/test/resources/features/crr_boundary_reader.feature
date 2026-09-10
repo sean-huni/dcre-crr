@@ -20,17 +20,16 @@ Feature: CRR boundary reader ingests OnHost collection request files
     Then the job completes with a clean business verdict
     And the spine holds one header row and 30 entry rows for the arrival
 
-  Scenario: A pay-flow launch stamps the header with the PAY flow
+  # AGT still emits a non-identifying flow=PAY arg on the ENDO route
+  # (JobLauncher.serviceArgs). Collections does not run the payments lane and no
+  # longer models a flow, so CRR must IGNORE that parameter and ingest normally.
+  # Rejecting it would make an AGT arg a hard dependency of a lane CRR is not part
+  # of; this scenario pins the ignore.
+  Scenario: A launch carrying a leftover flow parameter is ingested normally
     Given the boundary reader receives the standard V2 collection file
-    When the CRR job runs with the launch flow "PAY"
+    When the CRR job runs with the extra launch parameter "flow" set to "PAY"
     Then the job completes with a clean business verdict
-    And the header row is stamped with flow "PAY"
-
-  Scenario: A launch without a flow parameter defaults the header to collections
-    Given the boundary reader receives the standard V2 collection file
-    When the CRR job runs
-    Then the job completes with a clean business verdict
-    And the header row is stamped with flow "COL"
+    And the spine holds one header row and 30 entry rows for the arrival
 
   Scenario: A header declaring the wrong transaction count is rejected file-fatally
     Given the boundary reader receives the V2 file with a header declaring 31 transactions
@@ -42,6 +41,17 @@ Feature: CRR boundary reader ingests OnHost collection request files
     Given the boundary reader receives the V2 file with a truncated header
     When the CRR job runs
     Then the file is rejected file-fatally with a reason containing "header shorter"
+    And no spine entries are persisted for the arrival
+
+  # The reason below LEAVES THE BUILDING: HeaderService -> HeaderTasklet ->
+  # executionContext["fileFatalReason"] -> cir InitialResponseService, written
+  # verbatim into the client's NACK file and into cir_response.reason. SCRUM-107
+  # moved this verdict from LineRangePartitioner to the header stage, which
+  # changed the wording a client sees for a ragged book, so it is pinned here.
+  Scenario: A ragged final detail record is rejected file-fatally naming its LRECL
+    Given the boundary reader receives the V2 file with a truncated final detail
+    When the CRR job runs
+    Then the file is rejected file-fatally with a reason containing "detail LRECL 100 matches no layout"
     And no spine entries are persisted for the arrival
 
   Scenario: A filename contradicting the header destination is rejected file-fatally

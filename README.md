@@ -6,8 +6,9 @@ Collections Request Reader: boundary stage that ingests OnHost copybook files in
 
 CRR is the first stage of both request DAGs. OnHost drops a fixed-width copybook file into the per-client exchange (`onhost-req/in`), AGT registers the arrival and launches CRR as a short-lived Kubernetes Job with `arrival.id` as the identifying JobParameter (R-16). CRR parses the header, runs the file-fatal structural tier (R-19), then ingests every detail record; it is the single writer of the spine tables (R-04), and every downstream stage transitions via the database, never via files (R-30).
 
-- DC Collections route `onhost-req`: `CRR -> CTV -> { CDE || CIR }` (CDE future-dates the work)
-- ENDO Payments route `onhost-req-endo`: `CRR -> CTV -> AIS -> CIR` (SCRUM-69: immediate, no CDE; CRR stamps `tx_header.flow = 'PAY'` from AGT's launch arg and CRW picks the work up from ingest day)
+- DC Collections route `onhost-req`: `CRR -> CTV -> { CDE -> CRW -> Fint-Req, CIR -> OnHost-Resp }` (CDE future-dates the work)
+
+Collections does not run the payments lane, so CRR carries no flow discriminator: with one database per family every row in `dcre_col` is a collection. AGT still emits a non-identifying `flow=PAY` launch arg on the ENDO route; `crrJob` registers no `JobParametersValidator`, so CRR ignores it rather than failing a launch over a parameter belonging to a lane it is not part of.
 
 ## Architecture and principles
 
@@ -40,10 +41,10 @@ SOLID as applied here:
 
 Liquibase owns the schema, with per-service history tables (`crr_databasechangelog` / `crr_databasechangeloglock`) on the shared DB:
 
-- `001-spine.xml`: `tx_header` (UNIQUE arrival_id; raw + canonical msg_id per R-15) and `tx_entry` (UNIQUE arrival_id/sequence; amount_raw kept alongside the config-scaled DECIMAL while A-1 is open). Guarded MARK_RAN preconditions so bootstrap converges from any service order.
-- `002-batch-metadata.xml`: Liquibase-owned copy of the Spring Batch 6.0.4 postgres DDL (via `sqlFile`, vendored as `batch-metadata-crr.sql`), prefixed `CRR_BATCH_` (`spring.batch.jdbc.table-prefix`, `initialize-schema: never`), EXIT_MESSAGE widened to TEXT so CRDB-driver cause chains are never truncated (A-39b).
-- `003-layering.xml`: BaseEntity columns (version, created_at, updated_at).
-- `004-content-hash.xml`: nullable `tx_entry.content_hash CHAR(64)` plus the covering index `(arrival_id, content_hash, sequence)` for CTV's per-arrival window dup scan.
+The changelog is a **version 1 baseline**: every DCRE database is dropped and recreated at the v1 cutover, so the pre-v1 `2026/07` ladder is gone rather than superseded and the usual re-run guards (ANY-checksum overrides, `IF NOT EXISTS`, `onFail="MARK_RAN"`) are deliberately absent. The root master includes the per-month sub-master `2026/08/db.changelog-2026-08.xml`, never individual changesets.
+
+- `2026/08/001-batch-metadata.xml`: Liquibase-owned Spring Batch 6.0.4 job-repository DDL in pure typed tags, prefixed `CRR_BATCH_` (`dcre.batch.table-prefix`, `initialize-schema: never`), EXIT_MESSAGE widened to TEXT so CRDB-driver cause chains are never truncated (A-39b).
+- `2026/08/002-spine.xml`: `tx_header` (UNIQUE arrival_id; raw + canonical msg_id per R-15) and `tx_entry` (UNIQUE arrival_id/sequence; amount_raw kept alongside the config-scaled DECIMAL while A-1 is open), including the BaseEntity columns (version, created_at, updated_at), the nullable `content_hash CHAR(64)` with its covering index `(arrival_id, content_hash, sequence)` for CTV's per-arrival window dup scan, and the nullable `mandate_ref` that only DETAIL_V3 carries (M10).
 
 Key rules: R-04 single writer, R-05 restart-without-duplication, R-16 launch identity, R-19 file-fatal tier, R-30 boundary file I/O, R-31 filename grammar cross-check, R-33 two-plane failure evidence, R-34 exit-code wiring + prefixed metadata, R-35 synthetic seam contract, R-41 intra-file parallelism + content hash, A-2 V1 fail-closed.
 

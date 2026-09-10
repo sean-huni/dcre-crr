@@ -4,14 +4,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import za.co.fnb.dcre.crr.data.model.TxHeaderEntity;
 import za.co.fnb.dcre.crr.data.repo.TxHeaderRepo;
-import za.co.fnb.dcre.platform.files.Layouts;
+import za.co.fnb.dcre.platform.copybook.CopybookReader;
+import za.co.fnb.dcre.platform.copybook.FixedWidthRecord;
+import za.co.fnb.dcre.platform.copybook.ShortRecordException;
 import za.co.fnb.dcre.platform.files.R31Filename;
 import za.co.fnb.dcre.platform.model.OpaqueRef;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -20,13 +20,13 @@ import java.util.UUID;
  * structural tier (R-19): length, version incl. V1 fail-closed (A-2),
  * declared count, R-31 filename-vs-header cross-check. Persists via the
  * data/repo tier only.
+ *
+ * <p>The copybook read itself (ISO_8859_1 byte-transparent decode, fail-closed
+ * record-length gate) lives in platform-copybook, shared with the payments and
+ * mandates readers so a fix reaches all three instead of one fork.
  */
 @Service
 public class HeaderService {
-
-    /** Default flow: DC collections. AGT passes flow=PAY for ENDO arrivals (SCRUM-69). */
-    static final String FLOW_COL = "COL";
-    static final String FLOW_PAY = "PAY";
 
     private final TxHeaderRepo repo;
     private final boolean v1Enabled;
@@ -37,30 +37,25 @@ public class HeaderService {
     }
 
     /** @return the file-fatal reason, or empty when the header was accepted and persisted. */
-    public Optional<String> ingestHeader(UUID arrivalId, Path input, String originalName, String flow)
+    public Optional<String> ingestHeader(UUID arrivalId, Path input, String originalName)
             throws IOException {
-        final String stampedFlow = validatedFlow(flow);
         try {
-            // ISO_8859_1: byte-transparent (one byte = one char), same contract as
-            // the partitioned range reader; strict UTF-8 would crash on legacy bytes
-            List<String> lines = Files.readAllLines(input, java.nio.charset.StandardCharsets.ISO_8859_1);
-            if (lines.isEmpty()) {
+            BookRead book = readBook(input);
+            if (book.header() == null) {
                 throw new FileFatalException("empty file");
             }
-            String header = lines.get(0);
-            if (header.length() < Layouts.HEADER.length()) {
-                throw new FileFatalException("header shorter than attested content length 109");
-            }
-            int version = Integer.parseInt(Layouts.HEADER.slice(header, "layout_version").strip());
+            FixedWidthRecord headerRecord = book.header();
+            String header = headerRecord.line();
+            int version = Integer.parseInt(headerRecord.field("layout_version").strip());
             if (version == 1 && !v1Enabled) {
                 throw new FileFatalException("V1 layout fails closed in production (A-2)");
             }
-            int declared = Integer.parseInt(Layouts.HEADER.slice(header, "tx_count").strip());
-            int actual = lines.size() - 1;
+            int declared = Integer.parseInt(headerRecord.field("tx_count").strip());
+            int actual = book.detailCount();
             if (declared != actual) {
                 throw new FileFatalException("header tx_count=" + declared + " but file has " + actual);
             }
-            String destination = Layouts.HEADER.slice(header, "destination_id").strip();
+            String destination = headerRecord.field("destination_id").strip();
             Optional<R31Filename.Tokens> tokens = originalName != null
                     ? R31Filename.parse(originalName) : Optional.empty();
             if (tokens.isPresent() && !tokens.get().client().equals(destination)) {
@@ -69,29 +64,46 @@ public class HeaderService {
             }
             OpaqueRef msgId = OpaqueRef.ofFixedWidth(header.substring(4, 26));
             repo.upsert(TxHeaderEntity.of(arrivalId, msgId.rawBytes(), msgId.canonical(),
-                    Layouts.HEADER.slice(header, "created_ts"), declared, destination,
-                    Layouts.HEADER.slice(header, "business_date"),
-                    tokens.map(R31Filename.Tokens::client).orElse(null), version, stampedFlow));
+                    headerRecord.field("created_ts"), declared, destination,
+                    headerRecord.field("business_date"),
+                    tokens.map(R31Filename.Tokens::client).orElse(null), version));
             return Optional.empty();
         } catch (FileFatalException e) {
             return Optional.of(e.getMessage());
         }
     }
 
+    /** Record 0 and the detail count: everything this stage needs from the file. */
+    private record BookRead(FixedWidthRecord header, int detailCount) {
+    }
+
     /**
-     * Closed flow vocabulary (review m1, fail closed): COL or PAY only,
-     * absent/blank defaults to COL. Any other value is a launcher
-     * misconfiguration, never a business verdict about the FILE, so it
-     * throws (job FAILED) instead of returning a file-fatal reason.
+     * The shared copybook read, resolving each record's layout through
+     * {@link CollectionRecords} so the header is cut by the header table and a
+     * detail by its own. STREAMED: a collection book is large, which is why
+     * LineRangePartitioner and FixedRecordRangeReader exist, and this stage
+     * needs only record 0 and the count, so it holds one record at a time
+     * rather than the whole file plus a wrapper per line.
+     *
+     * <p>Only record 0 can be short here, so the translation names the header
+     * unconditionally: CollectionRecords rejects any detail whose LRECL matches
+     * no layout before the short gate is reached, and a detail that DOES match
+     * one is exactly that layout's length, so it can never be short. The
+     * previous "or report the later record as itself" branch was unreachable.
      */
-    private static String validatedFlow(String flow) {
-        if (flow == null || flow.isBlank()) {
-            return FLOW_COL;
+    private static BookRead readBook(Path input) throws IOException {
+        FixedWidthRecord[] header = new FixedWidthRecord[1];
+        try {
+            long records = CopybookReader.forEachRecord(input, CollectionRecords.INSTANCE,
+                    record -> {
+                        if (record.index() == 0) {
+                            header[0] = record;
+                        }
+                    });
+            return new BookRead(header[0], (int) records - 1);
+        } catch (ShortRecordException e) {
+            throw new FileFatalException(
+                    "header shorter than attested content length " + e.declaredLength());
         }
-        if (!FLOW_COL.equals(flow) && !FLOW_PAY.equals(flow)) {
-            throw new IllegalArgumentException(
-                    "unknown flow launch parameter '" + flow + "': COL or PAY only (fail closed)");
-        }
-        return flow;
     }
 }

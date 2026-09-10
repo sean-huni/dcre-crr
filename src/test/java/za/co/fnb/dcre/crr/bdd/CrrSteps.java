@@ -84,6 +84,21 @@ public class CrrSteps {
         originalName = V2_NAME;
     }
 
+    @Given("the boundary reader receives the V2 file with a truncated final detail")
+    public void v2FileWithRaggedFinalDetail() throws Exception {
+        // The header and every earlier record are intact; only the LAST detail is
+        // cut short, to 100 bytes, which matches no layout. Before SCRUM-107 this
+        // reached LineRangePartitioner; it is now caught at the header stage, and
+        // the reason string a client receives is what this scenario pins.
+        arrival = UUID.randomUUID();
+        List<String> lines = Files.readAllLines(sample(V2_SAMPLE));
+        List<String> details = new java.util.ArrayList<>(lines.subList(1, lines.size()));
+        int last = details.size() - 1;
+        details.set(last, details.get(last).substring(0, 100));
+        inputFile = writeInput("ragged-detail", lines.get(0), details);
+        originalName = V2_NAME;
+    }
+
     @Given("the file arrived under the name {string}")
     public void arrivedUnderName(String name) {
         originalName = name;
@@ -101,14 +116,15 @@ public class CrrSteps {
         execution = jobOperator.start(crrJob, params("2"));
     }
 
-    @When("the CRR job runs with the launch flow {string}")
-    public void crrJobRunsWithFlow(String flow) throws Exception {
-        // SCRUM-69: AGT passes flow=PAY for onhost-req-endo arrivals; the
-        // param is non-identifying, mirroring input.file/original.name.
-        JobParameters withFlow = new JobParametersBuilder(params(null))
-                .addString("flow", flow, false)
+    @When("the CRR job runs with the extra launch parameter {string} set to {string}")
+    public void crrJobRunsWithExtraParameter(String name, String value) throws Exception {
+        // Non-identifying, mirroring how AGT emits input.file/original.name and
+        // the leftover flow arg. crrJob registers no JobParametersValidator, so
+        // a parameter nothing reads must pass through without failing the launch.
+        JobParameters extra = new JobParametersBuilder(params(null))
+                .addString(name, value, false)
                 .toJobParameters();
-        execution = jobOperator.start(crrJob, withFlow);
+        execution = jobOperator.start(crrJob, extra);
     }
 
     @Then("the job completes with a clean business verdict")
@@ -133,12 +149,6 @@ public class CrrSteps {
                 "SELECT count(*) FROM tx_header WHERE arrival_id=?", Integer.class, arrival));
         assertEquals(entries, jdbc.queryForObject(
                 "SELECT count(*) FROM tx_entry WHERE arrival_id=?", Integer.class, arrival));
-    }
-
-    @Then("the header row is stamped with flow {string}")
-    public void headerStampedWithFlow(String flow) {
-        assertEquals(flow, jdbc.queryForObject(
-                "SELECT flow FROM tx_header WHERE arrival_id=?", String.class, arrival));
     }
 
     @Then("no spine entries are persisted for the arrival")

@@ -5,8 +5,8 @@ import org.springframework.batch.core.partition.Partitioner;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import za.co.fnb.dcre.crr.service.CollectionRecords;
 import za.co.fnb.dcre.crr.service.FileFatalException;
-import za.co.fnb.dcre.platform.files.Layouts;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
@@ -50,10 +50,22 @@ public class LineRangePartitioner implements Partitioner {
                 return Map.of(); // header-only file: no detail records
             }
             int lrecl = lineLength(baseOffset);
-            if (lrecl != Layouts.DETAIL_V1.length() && lrecl != Layouts.DETAIL_V2.length()
-                    && lrecl != Layouts.DETAIL_V3.length()) {
-                throw new FileFatalException("detail LRECL " + lrecl + " matches no layout");
-            }
+            // Fail closed on an LRECL matching no layout. UNREACHABLE IN-JOB since
+            // SCRUM-107: headerStep runs first and CollectionRecords rejects the same
+            // LRECL there, so no job reaches this line with a bad length.
+            //
+            // Kept deliberately, and the rule that says so, because the same round
+            // DELETED an unreachable branch in HeaderService (review I3-4) and
+            // consistency was fairly questioned (review N4): delete unreachable code
+            // that makes a CLAIM; keep an unreachable fail-closed PRECONDITION at a
+            // component boundary. HeaderService's branch chose between two messages
+            // where one arm could never be selected, so its javadoc described
+            // behaviour crr cannot produce: dead code that lied. This is a precondition
+            // on a component that is separately constructed and separately driven by 8
+            // unit tests, which is the path that keeps it live. Correcting the round-1
+            // report on its own terms: those tests prove the guard through the DIRECT
+            // path, not through the job.
+            CollectionRecords.detail(lrecl);
             long stride = lrecl + 1L;
             long detailBytes = size - baseOffset;
             long remainder = detailBytes % stride;

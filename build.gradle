@@ -14,6 +14,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-batch'
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
     implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
+    // The copybook layout tables and the fixed-width reader: a shared DEPENDENCY,
+    // imported per service. crr, prr and mrr stay separate deployables.
+    implementation 'za.co.fnb.dcre:platform-copybook:0.2.0'
     implementation 'za.co.fnb.dcre:platform-persistence:0.1.0'
     implementation 'org.liquibase:liquibase-core'
     implementation 'org.springframework.boot:spring-boot-liquibase'
