@@ -44,6 +44,10 @@
          ============================================================================ -->
 
     <changeSet id="crr-v1-tx-header" author="dcre">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="tx_header"/></not>
+        </preConditions>
+        
         <createTable tableName="tx_header">
             <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
                 <constraints primaryKey="true" nullable="false"/>
@@ -89,6 +93,10 @@
     </changeSet>
 
     <changeSet id="crr-v1-tx-entry" author="dcre">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="tx_entry"/></not>
+        </preConditions>
+        
         <createTable tableName="tx_entry">
             <column name="id" type="UUID" defaultValueComputed="gen_random_uuid()">
                 <constraints primaryKey="true" nullable="false"/>
